@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Torniquete Link - Panel de Control</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="glass-bg"></div>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-logo">
+        <i data-lucide="shield-check" class="logo-icon"></i>
+        <div>
+          <h1>Torniquete Link</h1>
+          <p>Servidor de Integración y Control Hikvision DS-K1T342MFWX-E1</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator online"></span>
+        <span class="status-text">Backend Activo</span>
+      </div>
+    </header>
+
+    <!-- Metrics -->
+    <section class="metrics-grid">
+      <div class="metric-card glass">
+        <div class="metric-icon info-tint">
+          <i data-lucide="scan"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value" id="metric-total">0</span>
+          <span class="metric-label">Escaneos Totales</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon success-tint">
+          <i data-lucide="unlock"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value text-success" id="metric-authorized">0</span>
+          <span class="metric-label">Accesos Autorizados</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon error-tint">
+          <i data-lucide="lock"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value text-danger" id="metric-denied">0</span>
+          <span class="metric-label">Accesos Denegados</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon warning-tint">
+          <i data-lucide="activity"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value" id="metric-rate">0%</span>
+          <span class="metric-label">Tasa de Aceptación</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main class="app-main">
+      <!-- Left Column: Operations and Settings -->
+      <div class="main-column flex-column">
+        <!-- Live Console -->
+        <div class="panel glass flex-grow">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="terminal"></i>
+              <h2>Consola en Tiempo Real</h2>
+            </div>
+            <button id="btn-clear-console" class="btn btn-icon-only" title="Limpiar Consola">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+          <div class="console-body" id="console-logs">
+            <div class="log-line info">
+              <span class="log-time">[---]</span>
+              <span class="log-message">Iniciando escucha de eventos de consola...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulator and Tools -->
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="cpu"></i>
+              <h2>Simulación y Pruebas</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="simulator-controls">
+              <div class="form-group">
+                <label for="sim-user-id">Seleccionar Usuario para Simular Escaneo</label>
+                <div class="input-action-group">
+                  <select id="sim-user-id" class="form-input">
+                    <option value="">-- Cargar usuarios del sistema --</option>
+                  </select>
+                  <button id="btn-simulate-scan" class="btn btn-primary">
+                    <i data-lucide="play"></i> Simular Escaneo
+                  </button>
+                </div>
+              </div>
+
+              <div class="divider">ó probar hardware</div>
+
+              <div class="btn-group">
+                <button id="btn-test-open" class="btn btn-secondary">
+                  <i data-lucide="key-round"></i> Enviar Comando de Apertura (API)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Device Settings -->
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="settings"></i>
+              <h2>Configuración del Dispositivo</h2>
+            </div>
+            <button id="btn-save-settings" class="btn btn-primary btn-sm">Guardar</button>
+          </div>
+          <div class="panel-body">
+            <form id="device-settings-form" class="settings-form">
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="setting-device-ip">IP del Lector</label>
+                  <input type="text" id="setting-device-ip" class="form-input" placeholder="192.168.1.100">
+                </div>
+                <div class="form-group flex-1">
+                  <label for="setting-device-port">Puerto</label>
+                  <input type="number" id="setting-device-port" class="form-input" placeholder="80">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="setting-device-user">Usuario ISAPI</label>
+                  <input type="text" id="setting-device-user" class="form-input" placeholder="admin">
+                </div>
+                <div class="form-group flex-1">
+                  <label for="setting-device-password">Contraseña ISAPI</label>
+                  <input type="password" id="setting-device-password" class="form-input" placeholder="••••••••">
+                </div>
+              </div>
+              <div class="form-row align-center">
+                <div class="form-group flex-1">
+                  <label for="setting-device-door">Canal de Puerta</label>
+                  <input type="number" id="setting-device-door" class="form-input" placeholder="1">
+                </div>
+                <div class="form-group flex-1 checkbox-group">
+                  <label class="checkbox-container">
+                    <input type="checkbox" id="setting-enable-api-open">
+                    <span class="checkmark"></span>
+                    Habilitar Apertura Remota
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Database and Logs -->
+      <div class="main-column">
+        <!-- User DB Management -->
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="users"></i>
+              <h2>Base de Datos de Usuarios</h2>
+            </div>
+            <button id="btn-show-add-user" class="btn btn-success btn-sm">
+              <i data-lucide="user-plus"></i> Registrar Usuario
+            </button>
+          </div>
+          <div class="panel-body">
+            <!-- User form modal/section (hidden by default) -->
+            <div id="user-form-container" class="form-panel hidden">
+              <h3 id="user-form-title">Registrar Nuevo Usuario</h3>
+              <form id="user-form">
+                <input type="hidden" id="user-db-id">
+                <div class="form-row">
+                  <div class="form-group flex-1">
+                    <label for="user-id">ID de Usuario (Escaneado)</label>
+                    <input type="text" id="user-id" class="form-input" required placeholder="Ej: 1001 o Card No">
+                  </div>
+                  <div class="form-group flex-1">
+                    <label for="user-name">Nombre Completo</label>
+                    <input type="text" id="user-name" class="form-input" required placeholder="Ej: Juan Pérez">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="user-api-url">API URL Relacionada</label>
+                  <input type="url" id="user-api-url" class="form-input" required placeholder="http://api.empresa.com/verify">
+                  <small class="helper-text">La API externa recibirá `?userId=...` y debe responder `{"authorized": true}`</small>
+                </div>
+                <div class="btn-group justify-end">
+                  <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>
+                  <button type="submit" class="btn btn-primary btn-sm">Guardar Usuario</button>
+                </div>
+              </form>
+              <div class="divider"></div>
+            </div>
+
+            <!-- Users Table -->
+            <div class="table-container">
+              <table class="data-table" id="users-table">
+                <thead>
+                  <tr>
+                    <th>ID Usuario</th>
+                    <th>Nombre</th>
+                    <th>API Relacionada</th>
+                    <th class="actions-col">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                  <tr>
+                    <td colspan="4" class="text-center">Cargando usuarios...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity Logs -->
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="history"></i>
+              <h2>Historial de Accesos Recientes</h2>
+            </div>
+            <button id="btn-clear-db-logs" class="btn btn-icon-only text-danger" title="Limpiar Historial">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+          <div class="panel-body">
+            <div class="table-container">
+              <table class="data-table" id="logs-table">
+                <thead>
+                  <tr>
+                    <th>Fecha/Hora</th>
+                    <th>Usuario</th>
+                    <th>Tipo</th>
+                    <th>API URL</th>
+                    <th>Respuesta</th>
+                    <th>Estado</th>
+                    <th>Apertura</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                  <tr>
+                    <td colspan="7" class="text-center">Cargando historial...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
