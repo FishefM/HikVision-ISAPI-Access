@@ -1,15 +1,12 @@
-# Sistema de Control de Accesos para Torniquetes (Hikvision ISAPI + Express + SQLite)
-
-Este proyecto es un servidor de control de accesos desarrollado sobre **Node.js (Express)** y **SQLite3**, diseñado para integrar terminales físicas de control de acceso **Hikvision** (lectores de tarjetas, reconocimiento facial y huellas dactilares) con sistemas escolares o empresariales mediante validaciones de APIs externas en tiempo real.
-
----
+# Sistema de Control de Accesos (Hikvision ISAPI + Express + SQLite)
+Este proyecto es un servidor de control de accesos desarrollado sobre **Node.js (Express)** y **SQLite3**, diseñado para integrar terminales físicas de control de acceso **Hikvision** (lectores de tarjetas, reconocimiento facial y huellas dactilares) con sistemas externos mediante validaciones de APIs en tiempo real.
 
 ## 1. Arquitectura General del Sistema
 
 El sistema implementa una arquitectura modular (patrón MVC/Routing) que separa la lógica de datos, controladores, enrutadores y utilidades de red:
 
-```
-Torniquete/
+```bash
+Sistema_Acceso/
 ├── config/
 │   └── database.js      # Inicialización de tablas y consultas CRUD en SQLite3
 ├── controllers/
@@ -32,37 +29,41 @@ Torniquete/
 │   ├── login.html       # Pantalla de inicio de sesión administrativo
 │   ├── app.js           # JavaScript del cliente administrativo
 │   └── style.css        # Estilos visuales optimizados (Glassmorphic Dark Mode)
+```
+```bash
 ├── db.js                # Wrapper legado para compatibilidad con código antiguo
 ├── device.js            # Wrapper legado para compatibilidad con código antiguo
 ├── database.sqlite      # Base de datos local autogenerada
 ├── package.json         # Declaración de dependencias y scripts npm
 └── server.js            # Punto de arranque y cargador de módulos
 ```
-
 ---
 
 ## 2. Base de Datos Local y Modelos (SQLite)
 
-El sistema utiliza **SQLite3** local por su velocidad de lectura y auto-suficiencia. Cuenta con tres tablas principales configuradas en [config/database.js](file:///home/yucef_U/Chamba/Torniquete/config/database.js):
+El sistema utiliza **SQLite3** local por su velocidad de lectura y auto-suficiencia. Cuenta con tres tablas principales configuradas en [config/database.js]
 
-### A. Tabla `users` (Directorio de Alumnos)
-Almacena los alumnos registrados que tienen permiso para intentar acceder al torniquete.
-*   `id` (INTEGER, Primary Key): ID auto-incremental.
-*   `user_id` (TEXT, Unique): ID lógico de la credencial (número de tarjeta, código de barras o ID facial registrado en el lector).
-*   `name` (TEXT): Nombre completo del alumno.
-*   `api_url` (TEXT): Dirección API específica a consultar para validar a este usuario (permite canalizar alumnos a distintas bases de datos o servidores escolares).
+| Columna   | Tipo      | Restricciones                        | Descripción                                                                 |
+|-----------|-----------|--------------------------------------|-----------------------------------------------------------------------------|
+| `id`      | INTEGER   | PRIMARY KEY, AUTOINCREMENT           | ID auto-incremental de la tabla                                            |
+| `user_id` | TEXT      | UNIQUE, NOT NULL                     | ID lógico de la credencial (tarjeta, código de barras o ID facial)         |
+| `name`    | TEXT      | NOT NULL                             | Nombre completo del alumno                                                 |
+| `api_url` | TEXT      | NULLABLE                             | Dirección API específica para validar al usuario (canalización a distintos servidores) |
 
 ### B. Tabla `access_logs` (Historial de Accesos)
 Almacena la bitácora histórica de todos los intentos de acceso.
-*   `id` (INTEGER, Primary Key): ID auto-incremental.
-*   `timestamp` (DATETIME): Fecha y hora del registro (por defecto `CURRENT_TIMESTAMP`).
-*   `user_id` (TEXT): ID de la tarjeta/rostro consultado.
-*   `name` (TEXT): Nombre del alumno o indicador de estado local (ej. "Desconocido").
-*   `event_type` (TEXT): Origen o tipo de evento (`card`, `face`, `simulated_scan`, `remote_open`).
-*   `api_url` (TEXT): API que fue consultada para validar el acceso.
-*   `api_response` (TEXT): Respuesta JSON cruda devuelta por la API externa (o descripción del error HTTP en caso de falla).
-*   `authorized` (INTEGER): Estado de autorización (`1` = Aprobado, `0` = Denegado).
-*   `door_opened` (INTEGER): Si el comando activo de apertura remota (`PUT`) fue gatillado exitosamente.
+
+| Columna         | Tipo      | Restricciones                        | Descripción                                                                 |
+|-----------------|-----------|--------------------------------------|-----------------------------------------------------------------------------|
+| `id`            | INTEGER   | PRIMARY KEY, AUTOINCREMENT           | ID auto-incremental del registro                                           |
+| `timestamp`     | DATETIME  | DEFAULT CURRENT_TIMESTAMP            | Fecha y hora del registro                                                  |
+| `user_id`       | TEXT      | NOT NULL                             | ID de la tarjeta/rostro consultado                                         |
+| `name`          | TEXT      | NOT NULL                             | Nombre del alumno o indicador de estado local (ej. "Desconocido")          |
+| `event_type`    | TEXT      | NOT NULL                             | Origen o tipo de evento (`card`, `face`, `simulated_scan`, `remote_open`)  |
+| `api_url`       | TEXT      | NULLABLE                             | API que fue consultada para validar el acceso                              |
+| `api_response`  | TEXT      | NULLABLE                             | Respuesta JSON cruda de la API externa o descripción de error HTTP         |
+| `authorized`    | INTEGER   | NOT NULL                             | Estado de autorización (`1` = Aprobado, `0` = Denegado)                    |
+| `door_opened`   | INTEGER   | NOT NULL                             | Indica si el comando de apertura remota (`PUT`) fue ejecutado exitosamente |
 
 ### C. Tabla `settings` (Configuración de Red y Dispositivo)
 Almacena variables de entorno clave como pares clave-valor.
@@ -78,14 +79,14 @@ Almacena variables de entorno clave como pares clave-valor.
 
 ## 3. Protocolo de Integración Hikvision ISAPI
 
-El servidor se comunica con las terminales Hikvision utilizando su API basada en HTTP llamada **ISAPI** (Intelligent Security API).
+!!! info El servidor se comunica con las terminales Hikvision utilizando su API basada en HTTP llamada **ISAPI** (Intelligent Security API).
 
 ### A. Recepción de Eventos de Verificación Remota (Webhook)
-Cuando un usuario presenta una tarjeta o rostro en el lector, la terminal actúa en modo de **Verificación Remota** (si está configurada así) enviando una petición HTTP POST a nuestro servidor. El servidor captura estas peticiones en las rutas montadas en [routes/device.js](file:///home/yucef_U/Chamba/Torniquete/routes/device.js) (`/`, `/event`, `/remoteCheck`, `/ISAPI/AccessControl/remoteCheck`).
+Cuando un usuario presenta una tarjeta o rostro en el lector, la terminal actúa en modo de **Verificación Remota** (si está configurada así) enviando una petición HTTP POST a nuestro servidor. El servidor captura estas peticiones en las rutas montadas en [routes/device.js] (`/`, `/event`, `/remoteCheck`, `/ISAPI/AccessControl/remoteCheck`).
 
 #### Peticiones Multipart y Heartbeats
 *   El lector envía datos estructurados en XML o JSON. A menudo se transmiten como cuerpos **multipart/form-data** acompañados de imágenes del rostro.
-*   Para garantizar la compatibilidad ante cualquier problema de parsing de librerías en Express, implementamos un extractor regex de respaldo sobre la variable `req.rawBody` en [controllers/accessController.js](file:///home/yucef_U/Chamba/Torniquete/controllers/accessController.js):
+*   Para garantizar la compatibilidad ante cualquier problema de parsing de librerías en Express, implementamos un extractor regex de respaldo sobre la variable `req.rawBody` en [controllers/accessController.js]
     *   Extrae el ID usando la expresión: `/<employeeNoString[^>]*>([^<]+)<\/employeeNoString>/`.
     *   Extrae el número de tarjeta usando: `/<cardNo[^>]*>([^<]+)<\/cardNo>/`.
 *   El lector suele enviar peticiones periódicas de **Heartbeat** (Latidos de vida) estructuradas en MIME boundaries para verificar si el servidor está en línea:
@@ -96,7 +97,7 @@ Cuando un usuario presenta una tarjeta o rostro en el lector, la terminal actúa
     ...
     { "eventType": "heartBeat", "eventDescription": "heartBeat" }
     ```
-    El servidor detecta esta cadena en el cuerpo de la solicitud de forma silenciosa y responde con un código de éxito para no saturar los registros:
+    !!! tip El servidor detecta esta cadena en el cuerpo de la solicitud de forma silenciosa y responde con un código de éxito para no saturar los registros:
     ```xml
     <?xml version="1.0" encoding="UTF-8"?>
     <ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
@@ -108,7 +109,7 @@ Cuando un usuario presenta una tarjeta o rostro en el lector, la terminal actúa
     ```
 
 #### Respuesta de Verificación de Acceso
-El servidor debe devolver una respuesta inmediata en menos de **1.5 segundos** (1500ms) para evitar timeouts en la terminal física. Dependiendo de la cabecera aceptada, devuelve JSON o XML. El formato estándar en XML es:
+!!! warning El servidor debe devolver una respuesta inmediata en menos de **1.5 segundos** (1500ms) para evitar timeouts en la terminal física. Dependiendo de la cabecera aceptada, devuelve JSON o XML. El formato estándar en XML es:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <RemoteCheck version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
@@ -116,7 +117,7 @@ El servidor debe devolver una respuesta inmediata en menos de **1.5 segundos** (
     <checkResult>success</checkResult> <!-- "success" para abrir, "failed" para denegar -->
 </RemoteCheck>
 ```
-*Nota: Si la respuesta es `success`, el lector de Hikvision se encarga automáticamente de liberar su relé físico local. Por ello, la columna de apertura en el servidor registrará `N/A`, ya que el hardware lo resolvió nativamente a partir de esta respuesta.*
+!!! Nota: Si la respuesta es `success`, el lector de Hikvision se encarga automáticamente de liberar su relé físico local.
 
 ### B. Comando de Apertura Forzada por API (Digest Authentication)
 Si un administrador pulsa el botón *"Enviar Comando de Apertura"* en el panel web, el servidor envía una petición HTTP PUT al lector al endpoint:
@@ -131,7 +132,7 @@ Cuerpo XML enviado:
 ```
 
 #### Flujo del Protocolo de Desafío/Respuesta Digest:
-Las terminales Hikvision protegen sus APIs usando Digest Authentication. El helper en [utils/device.js](file:///home/yucef_U/Chamba/Torniquete/utils/device.js) lo gestiona así:
+Las terminales Hikvision protegen sus APIs usando Digest Authentication. El helper en [utils/device.js] lo gestiona así:
 1.  **Paso 1 (Desafío)**: El servidor envía el `PUT` sin autenticar. El lector responde con `401 Unauthorized` y una cabecera `WWW-Authenticate` conteniendo `realm`, `nonce`, y `qop`.
 2.  **Paso 2 (Cálculo de Hashes MD5)**:
     *   $HA1 = \text{MD5}(\text{usuario} : \text{realm} : \text{contraseña})$
@@ -191,7 +192,7 @@ sequenceDiagram
 El sistema cuenta con dos visualizaciones web diseñadas en HSL oscuro (Glassmorphic) y responsivo:
 
 ### A. Dashboard de Administración (`index.html` en puerto 3000)
-Es la consola de administración protegida por credenciales. Contiene:
+!!! success Es la consola de administración protegida por credenciales. Contiene:
 *   **Métricas de Acceso**: Tarjetas procesadas hoy, accesos exitosos y accesos denegados, actualizándose al instante.
 *   **Consola en Vivo**: Transmisión de depuración en tiempo real del backend usando un log de color (azul para información, verde para éxitos, rojo para errores).
 *   **Directorio de Usuarios (Alumnos)**: Panel CRUD para registrar nuevos alumnos y asignarles su endpoint API individual.
@@ -200,7 +201,7 @@ Es la consola de administración protegida por credenciales. Contiene:
 *   **Historial de Accesos Recientes (Full-Width)**: Tabla de ancho completo al pie del panel que muestra de forma cómoda las columnas críticas (*Fecha/Hora, Usuario, Tipo, API URL y Respuesta*).
 
 ### B. Monitor de Confirmación Visual (`feedback.html` en puerto 3000)
-Es una pantalla ultra-minimalista optimizada para monitores auxiliares o tablets ubicadas en el torniquete.
+!!! success Es una pantalla ultra-minimalista optimizada para monitores auxiliares o tablets ubicadas en el torniquete.
 *   **Modo Standby**: Muestra el icono de escaneo animado en bucle con el texto *"Presente su Credencial"*.
 *   **Modo Autorizado**: Pantalla verde con un checkmark gigante y el nombre del alumno.
 *   **Modo Denegado**: Pantalla roja con un candado y el motivo exacto de la denegación (ej: *"Fuera de horario o alumno sin grupo"*).
@@ -208,7 +209,7 @@ Es una pantalla ultra-minimalista optimizada para monitores auxiliares o tablets
 *   **Botón Pantalla Completa**: En la esquina superior derecha cuenta con un botón flotante traslúcido de Pantalla Completa que expande u oculta la ventana usando la API de Pantalla Completa del navegador.
 *   **Comunicación en Tiempo Real**: Escucha eventos en segundo plano usando un canal de Server-Sent Events (SSE) `/api/logs-stream` que corre sin autenticación para facilitar la instalación del monitor sin login.
 
----
+<div style="page-break-after: always;"></div>
 
 ## 6. Configuración y Puesta en Marcha
 

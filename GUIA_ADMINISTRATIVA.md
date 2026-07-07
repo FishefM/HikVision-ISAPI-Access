@@ -1,6 +1,6 @@
 # Guía Administrativa: Requisitos e Instalación del Sistema de Control de Accesos
 
-Esta guía está dirigida al personal administrativo, directores de proyecto y personal de soporte técnico encargados de la planeación, despliegue y mantenimiento del sistema de control de accesos para torniquetes escolares.
+!!! Tip Esta guía está dirigida al personal administrativo, directores de proyecto y personal de soporte técnico encargados de la planeación, despliegue y mantenimiento del sistema de control de accesos para torniquetes escolares.
 
 ---
 
@@ -9,7 +9,7 @@ Esta guía está dirigida al personal administrativo, directores de proyecto y p
 Para garantizar que los alumnos ingresen de manera fluida y sin retrasos en las horas pico, la infraestructura debe cumplir con los siguientes estándares de red, hardware y desarrollo:
 
 ### A. Requisitos de Infraestructura de Red (LAN)
-El hardware Hikvision y el servidor local se comunican constantemente. Es crucial garantizar estabilidad en la red interna:
+!!! abstract El hardware Hikvision y el servidor local se comunican constantemente. Es crucial garantizar estabilidad en la red interna:
 *   **Direccionamiento IP Estático (Obligatorio)**:
     *   Tanto el servidor que corre el sistema (PC o Raspberry Pi) como los torniquetes físicos (lectores) deben tener asignadas **direcciones IP estáticas y fijas** en el router local. Si se cambia la IP por DHCP, el sistema perderá la conexión.
 *   **Puertos de Red Abiertos (LAN)**:
@@ -32,7 +32,7 @@ El software está altamente optimizado y no requiere servidores de gama alta. Pu
 La API externa (del portal escolar o administrativo que valida a los alumnos) es la que dictamina si se abre o no el torniquete. Debe cumplir con:
 *   **Tiempo de Respuesta**:
     *   La API escolar debe responder la consulta de verificación de asistencia en **menos de 800 milisegundos**.
-    *   *Nota*: Si la API tarda más de 1.5 segundos (1500ms), el torniquete físico entrará en "timeout" y le denegará el acceso al alumno de manera preventiva por seguridad.
+* !!! warning Si la API tarda más de 1.5 segundos (1500ms), el torniquete físico entrará en "timeout" y le denegará el acceso al alumno de manera preventiva por seguridad.
 *   **Protocolo Seguro**: Conexión HTTPS estable para resguardar la privacidad de los ID de los alumnos en tránsito.
 *   **Formato de Respuesta**: Debe responder en formato JSON estructurado, retornando códigos HTTP adecuados (ej. `200 OK` para alumnos autorizados, y códigos de error con el formato `{"message": "Motivo del rechazo"}` para alumnos bloqueados o fuera de horario).
 
@@ -51,22 +51,30 @@ El despliegue exitoso del sistema se divide en **5 fases estructuradas** a lo la
 gantt
     title Cronograma de Instalación - Control de Accesos
     dateFormat  YYYY-MM-DD
+    axisFormat %d
+    tickInterval 1day
+    
     section Fase 1: Red e Infraestructura
-    Cableado de Red y Montaje Eléctrico       :active, p1, 2026-07-07, 8d
-    Asignación de IPs Estáticas en LAN       : p2, after p1, 2d
+    Cableado de Red y Montaje Eléctrico       :active, p1, 2026-07-01, 8d
+    Asignación de IPs Estáticas en LAN        :p2, after p1, 2d
+    
     section Fase 2: Configuración Lector
-    Montaje de Torniquetes y Lectores        : p3, 2026-07-07, 7d
-    Configuración de Terminales Hikvision    : p4, after p2, 2d
+    Montaje de Torniquetes y Lectores         :p3, 2026-07-07, 7d
+    Configuración de Terminales Hikvision     :p4, after p2, 2d
+    
     section Fase 3: Despliegue de Servidor
-    Instalación del Servidor Local           : p5, after p4, 2d
-    Carga Inicial de Directorio Alumnos      : p6, after p5, 3d
+    Instalación del Servidor Local            :p5, after p4, 2d
+    Carga Inicial de Directorio Alumnos       :p6, after p5, 3d
+    
     section Fase 4: Pruebas e Integración
-    Pruebas Internas con Tarjetas            : p7, after p6, 3d
-    Calibración de Tiempos e Interfaz        : p8, after p7, 2d
+    Pruebas Internas con Tarjetas             :p7, after p6, 3d
+    Calibración de Tiempos e Interfaz         :p8, after p7, 2d
+    
     section Fase 5: Capacitación y Go-Live
-    Capacitación al Personal Administrativo  : p9, after p8, 2d
-    Arranque en Vivo y Soporte Presencial    : p10, after p9, 4d
+    Capacitación al Personal Administrativo   :p9, after p8, 2d
+    Arranque en Vivo y Soporte Presencial     :p10, after p9, 4d
 ```
+<div style="page-break-after: always;"></div>
 
 ### Detalle de Fases de Trabajo:
 
@@ -94,7 +102,7 @@ gantt
 
 #### Fase 5: Capacitación al Personal y Puesta en Marcha (Semana 4)
 *   **Capacitación**: Taller práctico para el personal administrativo y de prefectura sobre el uso del dashboard, altas/bajas de usuarios, consulta de registros históricos y generación de códigos QR de emergencia.
-*   **Go-Live (Arranque)**: Apertura oficial de los accesos con soporte técnico presencial durante las primeras horas de entrada escolar para resolver dudas o incidencias operativas.
+*   **Arranque**: Apertura oficial de los accesos con soporte técnico presencial durante las primeras horas de entrada escolar para resolver dudas o incidencias operativas.
 
 ---
 
@@ -102,5 +110,3 @@ gantt
 
 *   **Copias de Seguridad (Backups)**:
     Se recomienda copiar el archivo `database.sqlite` (ubicado en la raíz del proyecto) de manera semanal. Este archivo contiene toda la configuración y el directorio de usuarios. En caso de falla eléctrica del servidor, basta con pegar esta copia en un nuevo servidor para restaurar la operación en 5 minutos.
-*   **Gestión de Accesos de Invitados**:
-    Desde la pantalla de administración, el personal puede generar códigos QR temporales para accesos especiales o visitas, los cuales pueden imprimirse o mostrarse en pantallas de teléfonos celulares para registrar su ingreso.

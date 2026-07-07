@@ -5,6 +5,7 @@ const path = require('path');
 const configureBodyParsers = require('./middleware/bodyParsers');
 const { authMiddleware } = require('./middleware/auth');
 const { logEvent } = require('./utils/logger');
+const requestLogger = require('./middleware/requestLogger');
 
 // Import routes
 const apiRoutes = require('./routes/api');
@@ -13,6 +14,9 @@ const deviceRoutes = require('./routes/device');
 // Initialize application
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Log every incoming HTTP request to the server terminal
+app.use(requestLogger);
 
 // Enable Cross-Origin Resource Sharing
 app.use(cors());
