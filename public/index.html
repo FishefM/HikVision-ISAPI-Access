@@ -275,13 +275,12 @@
             <table class="data-table" id="logs-table">
               <thead>
                 <tr>
-                  <th style="width: 15%;">Fecha/Hora</th>
-                  <th style="width: 15%;">Usuario</th>
-                  <th style="width: 10%;">Tipo</th>
-                  <th style="width: 32%;">API URL</th>
-                  <th style="width: 12%;">Respuesta</th>
-                  <th style="width: 8%;">Estado</th>
-                  <th style="width: 8%;">Apertura</th>
+                  <th style="width: 12%;">Fecha/Hora</th>
+                  <th style="width: 16%;">Usuario</th>
+                  <th style="width: 12%;">Tipo</th>
+                  <th style="width: 26%;">API URL</th>
+                  <th style="width: 22%;">Respuesta</th>
+                  <th style="width: 12%;">Estado</th>
                 </tr>
               </thead>
               <tbody>
@@ -295,6 +294,25 @@
         </div>
       </div>
     </section>
+  <!-- QR Code Modal -->
+  <div id="qr-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700;">Código QR de Acceso</h3>
+        <button id="btn-close-qr-icon" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center;" title="Cerrar">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+        </button>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 1.25rem;">
+        <div style="background: white; padding: 1rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center;">
+          <img id="qr-modal-image" src="" alt="Código QR" style="width: 180px; height: 180px; display: block;" />
+        </div>
+        <div style="text-align: center;">
+          <h4 id="qr-modal-user-info" style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: #ffffff;">Nombre del Alumno</h4>
+          <span id="qr-modal-user-id" style="font-family: monospace; font-size: 0.9rem; color: var(--accent-blue);">ID: 0000</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

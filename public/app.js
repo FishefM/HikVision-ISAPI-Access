@@ -167,6 +167,9 @@ document.addEventListener('DOMContentLoaded', () => {
         <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${escapeHTML(user.api_url)}</span></td>
         <td class="actions-col">
           <div class="action-btn-group">
+            <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Código QR">
+              <i data-lucide="qr-code"></i>
+            </button>
             <button class="btn btn-icon-only edit-user-btn" data-id="${user.id}" title="Editar">
               <i data-lucide="edit"></i>
             </button>
@@ -183,6 +186,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) window.lucide.createIcons();
 
     // Attach Event Listeners to actions
+    document.querySelectorAll('.qr-user-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = parseInt(e.currentTarget.getAttribute('data-id'));
+        const user = usersList.find(u => u.id === id);
+        if (user) showUserQR(user);
+      });
+    });
+
     document.querySelectorAll('.edit-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
@@ -221,29 +232,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     logsList.forEach(log => {
       const isAuthorized = log.authorized === 1;
-      const isOpened = log.door_opened === 1;
       
       const badgeAuth = isAuthorized 
-        ? `<span class="badge badge-success"><i data-lucide="check-circle" style="width:10px;height:10px;"></i> Permitido</span>`
-        : `<span class="badge badge-danger"><i data-lucide="x-circle" style="width:10px;height:10px;"></i> Denegado</span>`;
+        ? `<span class="badge badge-success" style="white-space:nowrap;"><i data-lucide="check-circle" style="width:10px;height:10px;"></i> Permitido</span>`
+        : `<span class="badge badge-danger" style="white-space:nowrap;"><i data-lucide="x-circle" style="width:10px;height:10px;"></i> Denegado</span>`;
 
-      const badgeDoor = isOpened
-        ? `<span class="badge badge-info"><i data-lucide="door-open" style="width:10px;height:10px;"></i> Abierta</span>`
-        : `<span class="badge badge-warning"><i data-lucide="circle-slash" style="width:10px;height:10px;"></i> N/A</span>`;
-
-      // Extract time
+      // Short clean date formatting (e.g., 07/07 12:42:47)
       const date = new Date(log.timestamp);
-      const timeString = date.toLocaleString();
+      const pad = (n) => String(n).padStart(2, '0');
+      const timeString = `${pad(date.getDate())}/${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+
+      // Friendly event type badges in Spanish
+      const eventTypeMap = {
+        'simulated_scan': '<span class="badge badge-info">Simulado</span>',
+        'card': '<span class="badge badge-success">Tarjeta</span>',
+        'face': '<span class="badge badge-primary">Rostro</span>',
+        'heartBeat': '<span class="badge badge-warning">Latido</span>',
+        'unknown': '<span class="badge badge-secondary">Desconocido</span>'
+      };
+      const badgeType = eventTypeMap[log.event_type] || `<span class="badge badge-secondary">${escapeHTML(log.event_type)}</span>`;
+
+      // Summarize raw JSON response to save space
+      let friendlyResponse = 'N/A';
+      if (log.api_response && log.api_response !== 'N/A') {
+        try {
+          const parsed = JSON.parse(log.api_response);
+          if (parsed.message) {
+            friendlyResponse = parsed.message;
+            if (parsed.student) {
+              friendlyResponse += ` (${parsed.student})`;
+            }
+          } else if (parsed.error) {
+            friendlyResponse = parsed.error;
+          } else if (parsed.authorized !== undefined) {
+            friendlyResponse = parsed.authorized ? 'Permitido por API' : 'Denegado por API';
+          } else {
+            friendlyResponse = log.api_response;
+          }
+        } catch (e) {
+          friendlyResponse = log.api_response;
+        }
+      }
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${timeString}</td>
         <td><strong>${escapeHTML(log.user_id || 'N/A')}</strong><br><small class="text-muted">${escapeHTML(log.name || 'Desconocido')}</small></td>
-        <td><span class="badge badge-info">${escapeHTML(log.event_type || 'tarjeta')}</span></td>
+        <td>${badgeType}</td>
         <td><span class="text-muted" style="font-size:0.75rem; word-break:break-all;">${escapeHTML(log.api_url || 'N/A')}</span></td>
-        <td><span class="text-muted" style="font-family:monospace; font-size:0.75rem;">${escapeHTML(log.api_response || 'N/A')}</span></td>
+        <td><span class="text-muted" style="font-size:0.75rem; word-break:break-word;">${escapeHTML(friendlyResponse)}</span></td>
         <td>${badgeAuth}</td>
-        <td>${badgeDoor}</td>
       `;
       logsTableBody.appendChild(tr);
     });
@@ -477,6 +515,39 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // ==========================================================================
+  // QR Code Modal Handlers
+  // ==========================================================================
+  const qrModal = document.getElementById('qr-modal');
+  const qrModalImage = document.getElementById('qr-modal-image');
+  const qrModalUserInfo = document.getElementById('qr-modal-user-info');
+  const qrModalUserId = document.getElementById('qr-modal-user-id');
+  const btnCloseQrIcon = document.getElementById('btn-close-qr-icon');
+
+  function showUserQR(user) {
+    // Generate large clean QR code using the public api.qrserver.com
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=10&data=${encodeURIComponent(user.user_id)}`;
+    qrModalImage.src = qrUrl;
+    qrModalUserInfo.textContent = user.name;
+    qrModalUserId.textContent = `ID: ${user.user_id}`;
+    qrModal.classList.remove('hidden');
+  }
+
+  if (btnCloseQrIcon) {
+    btnCloseQrIcon.addEventListener('click', () => {
+      qrModal.classList.add('hidden');
+    });
+  }
+
+  // Close modal when clicking outside the box
+  if (qrModal) {
+    qrModal.addEventListener('click', (e) => {
+      if (e.target === qrModal) {
+        qrModal.classList.add('hidden');
+      }
+    });
   }
 
   // ==========================================================================
