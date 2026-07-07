@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Torniquete Link - Pantalla de Visualización</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root {
+      --bg-dark: #050710;
+      --accent-blue: #00d2ff;
+      --accent-green: #00e676;
+      --accent-red: #ff1744;
+      
+      --gradient-standby: radial-gradient(circle at center, #0b1437 0%, #050710 100%);
+      --gradient-success: linear-gradient(135deg, #004d40 0%, #00e676 100%);
+      --gradient-denied: linear-gradient(135deg, #b71c1c 0%, #ff1744 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg-dark);
+      color: #ffffff;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.8s ease;
+    }
+
+    /* Screen Wrapper States */
+    .screen {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      text-align: center;
+      transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      background: var(--gradient-standby);
+    }
+
+    .screen.state-success {
+      background: var(--gradient-success);
+    }
+
+    .screen.state-denied {
+      background: var(--gradient-denied);
+      animation: shake 0.5s ease-in-out;
+    }
+
+    /* Container for layout */
+    .content-box {
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    /* Icons and Animations */
+    .icon-container {
+      width: 25vmin;
+      height: 25vmin;
+      max-width: 130px;
+      max-height: 130px;
+      min-width: 80px;
+      min-height: 80px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 0.5rem;
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.5s ease;
+    }
+
+    .icon-container i {
+      width: 50% !important;
+      height: 50% !important;
+    }
+
+    /* Standby pulse effect */
+    .state-standby .icon-container {
+      animation: pulse-blue 2s infinite;
+      color: var(--accent-blue);
+    }
+
+    .state-success .icon-container {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.4);
+      color: #ffffff;
+      transform: scale(1.1);
+      box-shadow: 0 0 50px rgba(0, 230, 118, 0.5);
+    }
+
+    .state-denied .icon-container {
+      background: rgba(0, 0, 0, 0.2);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      transform: scale(1.1);
+      box-shadow: 0 0 50px rgba(255, 23, 68, 0.5);
+    }
+
+    /* Typography */
+    .status-title {
+      font-size: clamp(1.4rem, 4.5vmin, 2.2rem);
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 0.5rem;
+    }
+
+    .user-name {
+      font-size: clamp(1.8rem, 7vmin, 3.2rem);
+      font-weight: 800;
+      margin: 0.5rem 0;
+      text-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      line-height: 1.1;
+    }
+
+    .sub-message {
+      font-size: 1.5rem;
+      font-weight: 300;
+      color: rgba(255, 255, 255, 0.8);
+      max-width: 600px;
+    }
+
+    .reason-box {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-size: 1.2rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      margin-top: 1rem;
+      color: #ffeb3b;
+    }
+
+    /* Footer removed for ultra-minimalist design */
+
+    /* Animations declaration */
+    @keyframes pulse-blue {
+      0% {
+        box-shadow: 0 0 0 0 rgba(0, 210, 255, 0.4);
+      }
+      70% {
+        box-shadow: 0 0 0 30px rgba(0, 210, 255, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(0, 210, 255, 0);
+      }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+      20%, 40%, 60%, 80% { transform: translateX(10px); }
+    }
+
+    /* Audio alert trigger banner (Browsers block sound until first interaction) */
+    #sound-activation-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background: var(--accent-blue);
+      color: var(--bg-dark);
+      padding: 0.75rem;
+      text-align: center;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    /* Floating Fullscreen Button */
+    .fullscreen-btn {
+      position: fixed;
+      top: 1.5rem;
+      right: 1.5rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      padding: 0.75rem;
+      border-radius: 50%;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    .fullscreen-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: scale(1.1);
+      box-shadow: 0 6px 15px rgba(0, 210, 255, 0.4);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Audio Activation Banner -->
+  <div id="sound-activation-banner" onclick="enableAudio()">
+    <i data-lucide="volume-2"></i>
+    <span>Haga clic aquí para activar las alertas de sonido para la pantalla</span>
+  </div>
+
+  <!-- Floating Fullscreen Button -->
+  <button class="fullscreen-btn" id="btn-fullscreen" onclick="toggleFullscreen()" title="Pantalla Completa">
+    <i data-lucide="maximize" id="fullscreen-icon" style="width: 20px; height: 20px;"></i>
+  </button>
+
+  <!-- Screen Viewport -->
+  <div class="screen state-standby" id="screen-viewport">
+    <div class="content-box" id="container-box">
+      
+      <!-- Icon Container -->
+      <div class="icon-container" id="icon-wrapper">
+        <i data-lucide="scan" id="state-icon"></i>
+      </div>
+
+      <!-- Main Messages -->
+      <h2 class="status-title" id="status-title" style="margin-top: 1rem;">Presente su Credencial</h2>
+      <h1 class="user-name" id="user-display" style="display: none;"></h1>
+      <p class="sub-message" id="sub-message" style="display: none;"></p>
+      
+      <!-- Reason (Shown only on Denied) -->
+      <div class="reason-box" id="reason-container" style="display: none;"></div>
+
+    </div>
+  </div>
+
+  <script>
+    // Fullscreen API Handler
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.error(`Error al intentar activar pantalla completa: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      const icon = document.getElementById('fullscreen-icon');
+      if (document.fullscreenElement) {
+        icon.setAttribute('data-lucide', 'minimize');
+      } else {
+        icon.setAttribute('data-lucide', 'maximize');
+      }
+      lucide.createIcons();
+    });
+
+    // Web Audio Context for browser chimes
+    let audioCtx = null;
+
+    function enableAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      document.getElementById('sound-activation-banner').style.display = 'none';
+      
+      // Play a short low confirmation beep
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    // Play access audio notes
+    function playChime(success) {
+      if (!audioCtx) return;
+      
+      try {
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+
+        if (success) {
+          // Pleasant high chord (C5 and E5)
+          osc1.frequency.setValueAtTime(523.25, now); // C5
+          osc2.frequency.setValueAtTime(659.25, now); // E5
+          gainNode.gain.setValueAtTime(0.15, now);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+          
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 0.6);
+          osc2.stop(now + 0.6);
+        } else {
+          // Warning low sound (G2 and Ab2)
+          osc1.frequency.setValueAtTime(98.00, now); // G2
+          osc2.frequency.setValueAtTime(103.83, now); // Ab2
+          gainNode.gain.setValueAtTime(0.25, now);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+          
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 0.8);
+          osc2.stop(now + 0.8);
+        }
+      } catch (err) {
+        console.error('Audio synthesis failed:', err);
+      }
+    }
+
+    // Elements
+    const screenViewport = document.getElementById('screen-viewport');
+    const stateIcon = document.getElementById('state-icon');
+    const statusTitle = document.getElementById('status-title');
+    const userDisplay = document.getElementById('user-display');
+    const subMessage = document.getElementById('sub-message');
+    const reasonContainer = document.getElementById('reason-container');
+    const iconWrapper = document.getElementById('icon-wrapper');
+
+    let resetTimer = null;
+
+    // Reset back to standby state
+    function resetToStandby() {
+      screenViewport.className = 'screen state-standby';
+      iconWrapper.style.transform = 'scale(1)';
+      stateIcon.setAttribute('data-lucide', 'scan');
+      statusTitle.textContent = 'Presente su Credencial';
+      statusTitle.style.display = 'block';
+      userDisplay.style.display = 'none';
+      userDisplay.textContent = '';
+      subMessage.style.display = 'none';
+      reasonContainer.style.display = 'none';
+      reasonContainer.textContent = '';
+      lucide.createIcons();
+    }
+
+    // Trigger visual states
+    function showFeedback(authorized, name, userId, reason) {
+      // Clear existing reset timer
+      if (resetTimer) clearTimeout(resetTimer);
+
+      if (authorized) {
+        // Success State
+        screenViewport.className = 'screen state-success';
+        stateIcon.setAttribute('data-lucide', 'check');
+        statusTitle.textContent = 'Acceso Autorizado';
+        userDisplay.textContent = name || '';
+        userDisplay.style.display = name ? 'block' : 'none';
+        subMessage.style.display = 'none';
+        reasonContainer.style.display = 'none';
+        
+        playChime(true);
+      } else {
+        // Denied State
+        screenViewport.className = 'screen state-denied';
+        stateIcon.setAttribute('data-lucide', 'lock');
+        statusTitle.textContent = 'Acceso Denegado';
+        userDisplay.textContent = name === 'Desconocido' ? 'Usuario Desconocido' : (name || '');
+        userDisplay.style.display = name ? 'block' : 'none';
+        subMessage.style.display = 'none';
+        
+        reasonContainer.textContent = reason || 'Acceso Denegado';
+        reasonContainer.style.display = 'block';
+        
+        playChime(false);
+      }
+
+      // Re-render Lucide icons dynamically
+      lucide.createIcons();
+
+      // Set timer to go back to standby after 4 seconds
+      resetTimer = setTimeout(resetToStandby, 4000);
+    }
+
+    // Establish Server-Sent Events stream connection to the backend
+    function connectSSE() {
+      console.log('Connecting to access events stream...');
+      const eventSource = new EventSource('/api/logs-stream');
+
+      eventSource.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          // Intercept access feedback events
+          if (data.type === 'access_feedback') {
+            showFeedback(data.authorized, data.name, data.userId, data.reason);
+          }
+        } catch (err) {
+          console.error('Error parsing SSE event data:', err);
+        }
+      };
+
+      eventSource.onerror = function(err) {
+        console.error('SSE Connection lost. Reconnecting in 5 seconds...', err);
+        eventSource.close();
+        setTimeout(connectSSE, 5000);
+      };
+    }
+
+    // Initialize
+    lucide.createIcons();
+    connectSSE();
+  </script>
+</body>
+</html>

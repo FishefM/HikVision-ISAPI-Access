@@ -70,7 +70,11 @@ function initializeDatabase() {
         stmt.run("device_password", "Admin12345");
         stmt.run("device_door_channel", "1");
         stmt.run("enable_device_api_open", "false"); // whether to execute the Remote Open PUT command
+        stmt.run("admin_password", "admin123");
         stmt.finalize();
+      } else if (!err) {
+        // Ensure admin_password exists even if settings are already seeded
+        db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')");
       }
     });
   });

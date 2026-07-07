@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const usersTableBody = document.querySelector('#users-table tbody');
   const logsTableBody = document.querySelector('#logs-table tbody');
   const btnClearDbLogs = document.getElementById('btn-clear-db-logs');
+  const btnLogout = document.getElementById('btn-logout');
 
   // Metrics elements
   const metricTotal = document.getElementById('metric-total');
@@ -346,6 +347,11 @@ document.addEventListener('DOMContentLoaded', () => {
       enable_device_api_open: document.getElementById('setting-enable-api-open').checked ? 'true' : 'false'
     };
 
+    const adminPasswordInput = document.getElementById('setting-admin-password');
+    if (adminPasswordInput && adminPasswordInput.value.trim() !== '') {
+      data.admin_password = adminPasswordInput.value;
+    }
+
     try {
       const res = await fetch(API_SETTINGS, {
         method: 'POST',
@@ -354,7 +360,8 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       
       if (res.ok) {
-        appendConsoleLog('success', 'Configuración de dispositivo guardada correctamente.');
+        appendConsoleLog('success', 'Configuración de dispositivo y acceso guardada correctamente.');
+        if (adminPasswordInput) adminPasswordInput.value = '';
         refreshSettings();
       } else {
         throw new Error('Fallo al guardar configuración.');
@@ -440,6 +447,24 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+
+  // Logout Handler
+  if (btnLogout) {
+    btnLogout.addEventListener('click', async () => {
+      if (confirm('¿Desea cerrar la sesión del panel de administración?')) {
+        try {
+          const res = await fetch('/api/logout', { method: 'POST' });
+          if (res.ok) {
+            window.location.href = '/login.html';
+          } else {
+            alert('Error al cerrar sesión');
+          }
+        } catch (err) {
+          alert('Error al conectar con el servidor');
+        }
+      }
+    });
+  }
 
   // ==========================================================================
   // Helper Functions

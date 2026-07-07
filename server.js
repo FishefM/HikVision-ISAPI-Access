@@ -9,13 +9,124 @@ const deviceHelper = require('./device');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS and basic parsing
+// Enable CORS and basic parsing with rawBody capture
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Serve static dashboard files
-app.use(express.static(path.join(__dirname, 'public')));
+// 1. JSON body parser with raw body verification
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
+
+// 2. URL-encoded body parser with raw body verification
+app.use(express.urlencoded({
+  extended: true,
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
+
+// 3. Text/XML body parser to capture raw XML/plain text without consuming streams twice
+app.use(express.text({
+  type: ['*/xml', 'application/xml', 'text/xml', 'text/plain'],
+  limit: '10mb'
+}));
+
+// 4. Middleware to process text bodies and parse XML
+app.use((req, res, next) => {
+  // If the body is still a raw text string (from express.text), copy to rawBody and parse if XML
+  if (typeof req.body === 'string') {
+    req.rawBody = req.body;
+    
+    const isXml = req.headers['content-type'] && 
+                 (req.headers['content-type'].includes('/xml') || req.headers['content-type'].includes('+xml'));
+                 
+    if (isXml) {
+      xml2js.parseString(req.rawBody, { explicitArray: false, mergeAttrs: true }, (err, result) => {
+        if (err) {
+          logEvent('warning', 'Failed to parse incoming XML body formally. Fallback parser will be used.');
+        } else {
+          req.body = result;
+        }
+        next();
+      });
+      return;
+    }
+  }
+  next();
+});
+
+const crypto = require('crypto');
+// Generate a session token that lasts as long as the server is running
+const currentSessionToken = crypto.randomBytes(32).toString('hex');
+
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+  if (rc) {
+    rc.split(';').forEach(cookie => {
+      const parts = cookie.split('=');
+      list[parts.shift().trim()] = decodeURI(parts.join('='));
+    });
+  }
+  return list;
+}
+
+const authMiddleware = (req, res, next) => {
+  // Define public static assets and public API endpoints
+  const publicRoutes = [
+    '/login.html',
+    '/feedback.html',
+    '/api/login',
+    '/api/logs-stream'
+  ];
+
+  // Check if path is public, static assets, or Hikvision terminal POST events
+  if (
+    publicRoutes.includes(req.path) ||
+    req.path.startsWith('/css/') ||
+    req.path.startsWith('/js/') ||
+    req.path.startsWith('/favicon.ico') ||
+    (req.method === 'POST' && (
+      req.path === '/' || 
+      req.path === '/event' || 
+      req.path === '/api/event' || 
+      req.path.startsWith('/ISAPI/') || 
+      req.path === '/remoteCheck'
+    ))
+  ) {
+    return next();
+  }
+
+  // Verify session cookie
+  const cookies = parseCookies(req);
+  if (cookies.admin_session === currentSessionToken) {
+    return next();
+  }
+
+  // Redirect page requests to login.html
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    return res.redirect('/login.html');
+  }
+
+  // Deny access to other API endpoints
+  return res.status(401).json({ error: 'No autorizado. Por favor inicie sesión.' });
+};
+
+// Protect all admin routes and APIs
+app.use(authMiddleware);
+
+// Serve static dashboard files with cache disabled for instant UI updates
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, path) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+}));
 
 // Server-Sent Events (SSE) clients for real-time logs
 let sseClients = [];
@@ -45,42 +156,22 @@ function logEvent(type, message) {
   });
 }
 
-// Middleware to capture raw body text (useful for fallback XML/JSON parsing and regex search)
-app.use((req, res, next) => {
-  let data = '';
-  req.setEncoding('utf8');
-  req.on('data', chunk => {
-    data += chunk;
+/**
+ * Sends real-time visual feedback details to dedicated feedback screens.
+ */
+function sendFeedbackToScreen(authorized, name, userId, reason) {
+  const feedbackObj = {
+    type: 'access_feedback',
+    authorized,
+    name,
+    userId,
+    reason
+  };
+  const data = JSON.stringify(feedbackObj);
+  sseClients.forEach(client => {
+    client.write(`data: ${data}\n\n`);
   });
-  req.on('end', () => {
-    req.rawBody = data;
-    next();
-  });
-});
-
-// Middleware to parse XML bodies
-app.use((req, res, next) => {
-  if (req.rawBody && req.headers['content-type'] && 
-     (req.headers['content-type'].includes('/xml') || req.headers['content-type'].includes('+xml'))) {
-    xml2js.parseString(req.rawBody, { explicitArray: false, mergeAttrs: true }, (err, result) => {
-      if (err) {
-        logEvent('warning', 'Failed to parse incoming XML body formally. Fallback parser will be used.');
-      } else {
-        req.body = result;
-      }
-      next();
-    });
-  } else if (req.rawBody && req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
-    try {
-      req.body = JSON.parse(req.rawBody);
-    } catch (e) {
-      // JSON parsing failed, let other handlers try
-    }
-    next();
-  } else {
-    next();
-  }
-});
+}
 
 /**
  * Extract User ID and Serial Number from the request.
@@ -90,21 +181,35 @@ function extractDeviceRequestInfo(req) {
   let userId = null;
   let serialNo = '1';
   let eventType = 'unknown';
+  let isHeartbeat = false;
+
+  // Detect heartbeat from rawBody or parsed body
+  if (req.rawBody && (req.rawBody.includes('"heartBeat"') || req.rawBody.includes('"heartbeat"') || req.rawBody.includes('heartBeat') || req.rawBody.includes('heartbeat') || req.rawBody.includes('HEARTBEAT'))) {
+    isHeartbeat = true;
+    eventType = 'heartBeat';
+  }
 
   // 1. Check formal parsed XML or JSON
   if (req.body) {
     const root = req.body.AccessControllerEvent || req.body.EventNotificationAlert || req.body;
     
     if (root) {
-      userId = root.employeeNoString || root.cardNo || root.userId || root.userNo;
-      if (root.serialNo) serialNo = String(root.serialNo);
-      if (root.currentVerifyMode) eventType = root.currentVerifyMode;
-      else if (root.eventType) eventType = root.eventType;
+      if (root.eventType === 'heartBeat' || root.eventDescription === 'heartBeat' || root.eventType === 'heartbeat') {
+        isHeartbeat = true;
+        eventType = 'heartBeat';
+      }
+      
+      if (!isHeartbeat) {
+        userId = root.employeeNoString || root.cardNo || root.userId || root.userNo;
+        if (root.serialNo) serialNo = String(root.serialNo);
+        if (root.currentVerifyMode) eventType = root.currentVerifyMode;
+        else if (root.eventType) eventType = root.eventType;
+      }
     }
   }
 
-  // 2. Fallback to Regex search in case of multipart or parse issues
-  if (!userId && req.rawBody) {
+  // 2. Fallback to Regex search in case of multipart or parse issues (only if not a heartbeat)
+  if (!isHeartbeat && !userId && req.rawBody) {
     // Try employeeNoString
     const employeeNoMatch = req.rawBody.match(/<employeeNoString[^>]*>([^<]+)<\/employeeNoString>/) || 
                             req.rawBody.match(/"employeeNoString"\s*:\s*["']?([^"',\s}]+)["']?/);
@@ -130,7 +235,7 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
-  return { userId, serialNo, eventType };
+  return { userId, serialNo, eventType, isHeartbeat };
 }
 
 /**
@@ -149,6 +254,7 @@ async function processAccessRequest(reqInfo, clientIp) {
   if (!userId) {
     logEvent('error', 'Rechazado: ID de usuario no proporcionado en la solicitud.');
     await dbHelper.addLog(null, 'Desconocido', eventType, 'N/A', { error: 'No User ID found' }, false, false);
+    sendFeedbackToScreen(false, 'Desconocido', null, 'ID de usuario no proporcionado');
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
@@ -159,6 +265,7 @@ async function processAccessRequest(reqInfo, clientIp) {
   if (!user) {
     logEvent('warning', `Usuario con ID ${userId} no está registrado en la base de datos local.`);
     await dbHelper.addLog(userId, 'No registrado', eventType, 'N/A', { error: 'User not registered' }, false, false);
+    sendFeedbackToScreen(false, 'Desconocido', userId, 'ID de tarjeta no registrado');
     return { authorized: false, reason: 'User not registered', serialNo };
   }
 
@@ -170,26 +277,46 @@ async function processAccessRequest(reqInfo, clientIp) {
   let apiResponse = null;
 
   try {
+    const isLocalMock = user.api_url.includes('localhost') || user.api_url.includes('127.0.0.1');
+    const apiParams = isLocalMock ? {
+      userId: user.user_id,
+      name: user.name,
+      eventType: eventType
+    } : {};
+
     const apiResponseCall = await axios.get(user.api_url, {
-      params: {
-        userId: user.user_id,
-        name: user.name,
-        eventType: eventType
+      params: apiParams,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
       },
-      timeout: 4000 // 4 seconds timeout
+      timeout: 10000 // 10 seconds timeout
     });
 
     apiResponse = apiResponseCall.data;
     logEvent('info', `API Respuesta (Status ${apiResponseCall.status}): ${JSON.stringify(apiResponse)}`);
 
     if (apiResponseCall.status === 200 && apiResponse) {
-      if (
+      if (apiResponse.student) {
+        authorized = true;
+        // Dynamically update the user's name with the one returned by the API
+        user.name = apiResponse.student;
+      } else if (
         apiResponse.authorized === true ||
         apiResponse.allow === true ||
         apiResponse.status === 'allow' ||
         apiResponse.access === 'grant' ||
         apiResponse.access === true
       ) {
+        authorized = true;
+      } else if (apiResponse.message && 
+                (apiResponse.message.toLowerCase().includes('asistencia') || 
+                 apiResponse.message.toLowerCase().includes('registrada') || 
+                 apiResponse.message.toLowerCase().includes('éxito') ||
+                 apiResponse.message.toLowerCase().includes('exito'))) {
         authorized = true;
       }
     }
@@ -232,6 +359,21 @@ async function processAccessRequest(reqInfo, clientIp) {
   // Write log to DB
   await dbHelper.addLog(userId, user.name, eventType, user.api_url, apiResponse, authorized, doorOpened);
 
+  // Determine deny reason if any
+  let denyReason = 'Acceso Autorizado';
+  if (!authorized) {
+    if (apiResponse && apiResponse.message) {
+      denyReason = apiResponse.message;
+    } else if (apiResponse && apiResponse.error) {
+      denyReason = `Error: ${apiResponse.error}`;
+    } else {
+      denyReason = 'Rechazado por API de Asistencia';
+    }
+  }
+
+  // Send feedback event to dedicated screen
+  sendFeedbackToScreen(authorized, user.name, userId, denyReason);
+
   return { authorized, name: user.name, serialNo, doorOpened };
 }
 
@@ -242,6 +384,38 @@ async function processAccessRequest(reqInfo, clientIp) {
 const handleDevicePOST = async (req, res) => {
   const reqInfo = extractDeviceRequestInfo(req);
   const clientIp = req.ip || req.connection.remoteAddress;
+
+  // Handle Heartbeat silently to avoid cluttering logs and DB
+  if (reqInfo.isHeartbeat) {
+    console.log(`[DEBUG] Heartbeat recibido del dispositivo IP: ${clientIp}`);
+    
+    // Check if JSON or XML response format is expected
+    const isJsonRequested = req.url.includes('format=json') || 
+                            (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
+                            (req.rawBody && req.rawBody.includes('application/json'));
+
+    if (isJsonRequested) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).json({
+        ResponseStatus: {
+          requestURL: req.url || '/',
+          statusCode: 1,
+          statusString: "OK",
+          subStatusCode: "ok"
+        }
+      });
+    } else {
+      res.setHeader('Content-Type', 'application/xml');
+      const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+    <requestURL>${req.url || '/'}</requestURL>
+    <statusCode>1</statusCode>
+    <statusString>OK</statusString>
+    <subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+      return res.status(200).send(xmlResponse);
+    }
+  }
 
   try {
     const result = await processAccessRequest(reqInfo, clientIp);
@@ -300,8 +474,42 @@ app.get('/api/logs-stream', (req, res) => {
 });
 
 // ----------------------------------------------------
-// Admin REST APIs
+// Authentication Endpoints
 // ----------------------------------------------------
+
+app.post('/api/login', async (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: 'Contraseña requerida.' });
+  }
+
+  try {
+    const settings = await dbHelper.getSettings();
+    const storedPassword = settings.admin_password || 'admin123';
+    
+    if (password === storedPassword) {
+      res.setHeader('Set-Cookie', `admin_session=${currentSessionToken}; Path=/; HttpOnly; SameSite=Strict`);
+      return res.json({ success: true, message: 'Sesión iniciada correctamente.' });
+    } else {
+      return res.status(401).json({ error: 'Contraseña incorrecta.' });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: 'Error del servidor al iniciar sesión.' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  res.setHeader('Set-Cookie', `admin_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  return res.json({ success: true, message: 'Sesión cerrada.' });
+});
+
+app.get('/api/auth-check', (req, res) => {
+  const cookies = parseCookies(req);
+  if (cookies.admin_session === currentSessionToken) {
+    return res.json({ authenticated: true });
+  }
+  return res.json({ authenticated: false });
+});
 
 // Users Management
 app.get('/api/users', async (req, res) => {

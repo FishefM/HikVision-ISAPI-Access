@@ -632,16 +632,20 @@ select.form-input {
   border-collapse: collapse;
   font-size: 0.875rem;
   text-align: left;
+  table-layout: fixed; /* Respect column widths strictly */
 }
 
 .data-table th,
 .data-table td {
   padding: 0.875rem 1rem;
   border-bottom: 1px solid var(--border-color);
+  word-wrap: break-word;
+  word-break: break-all; /* Break long strings like URLs */
+  white-space: normal;   /* Allow text wrap */
 }
 
 .data-table th {
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: #12183a; /* Solid background to prevent overlap when scrolling */
   color: var(--text-muted);
   font-weight: 500;
   position: sticky;

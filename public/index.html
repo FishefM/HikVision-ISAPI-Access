@@ -28,9 +28,15 @@
           <p>Servidor de Integración y Control Hikvision DS-K1T342MFWX-E1</p>
         </div>
       </div>
-      <div class="header-status">
-        <span class="status-indicator online"></span>
-        <span class="status-text">Backend Activo</span>
+      <div class="header-status" style="display: flex; align-items: center; gap: 1.25rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="status-indicator online"></span>
+          <span class="status-text">Backend Activo</span>
+        </div>
+        <button id="btn-logout" class="btn btn-danger btn-sm" style="display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; background: rgba(255, 23, 68, 0.15); border: 1px solid rgba(255, 23, 68, 0.3); color: #ff5252;">
+          <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+          <span>Cerrar Sesión</span>
+        </button>
       </div>
     </header>
 
@@ -74,29 +80,31 @@
       </div>
     </section>
 
+    <!-- Live Console (Full Width) -->
+    <section class="console-section" style="width: 100%; margin-bottom: 1.5rem;">
+      <div class="panel glass">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i data-lucide="terminal"></i>
+            <h2>Consola en Tiempo Real</h2>
+          </div>
+          <button id="btn-clear-console" class="btn btn-icon-only" title="Limpiar Consola">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+        <div class="console-body" id="console-logs" style="max-height: 250px;">
+          <div class="log-line info">
+            <span class="log-time">[---]</span>
+            <span class="log-message">Iniciando escucha de eventos de consola...</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Main Workspace -->
     <main class="app-main">
       <!-- Left Column: Operations and Settings -->
-      <div class="main-column flex-column">
-        <!-- Live Console -->
-        <div class="panel glass flex-grow">
-          <div class="panel-header">
-            <div class="panel-title">
-              <i data-lucide="terminal"></i>
-              <h2>Consola en Tiempo Real</h2>
-            </div>
-            <button id="btn-clear-console" class="btn btn-icon-only" title="Limpiar Consola">
-              <i data-lucide="trash-2"></i>
-            </button>
-          </div>
-          <div class="console-body" id="console-logs">
-            <div class="log-line info">
-              <span class="log-time">[---]</span>
-              <span class="log-message">Iniciando escucha de eventos de consola...</span>
-            </div>
-          </div>
-        </div>
-
+      <div class="main-column">
         <!-- Simulator and Tools -->
         <div class="panel glass">
           <div class="panel-header">
@@ -174,6 +182,12 @@
                   </label>
                 </div>
               </div>
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="setting-admin-password">Contraseña de Administrador (Acceso al Panel)</label>
+                  <input type="password" id="setting-admin-password" class="form-input" placeholder="Dejar en blanco para no cambiar">
+                </div>
+              </div>
             </form>
           </div>
         </div>
@@ -226,10 +240,10 @@
               <table class="data-table" id="users-table">
                 <thead>
                   <tr>
-                    <th>ID Usuario</th>
-                    <th>Nombre</th>
-                    <th>API Relacionada</th>
-                    <th class="actions-col">Acciones</th>
+                    <th style="width: 20%;">ID Usuario</th>
+                    <th style="width: 25%;">Nombre</th>
+                    <th style="width: 40%;">API Relacionada</th>
+                    <th style="width: 15%; text-align: right;">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,46 +254,47 @@
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-
-        <!-- Recent Activity Logs -->
-        <div class="panel glass">
-          <div class="panel-header">
-            <div class="panel-title">
-              <i data-lucide="history"></i>
-              <h2>Historial de Accesos Recientes</h2>
-            </div>
-            <button id="btn-clear-db-logs" class="btn btn-icon-only text-danger" title="Limpiar Historial">
-              <i data-lucide="trash-2"></i>
-            </button>
-          </div>
-          <div class="panel-body">
-            <div class="table-container">
-              <table class="data-table" id="logs-table">
-                <thead>
-                  <tr>
-                    <th>Fecha/Hora</th>
-                    <th>Usuario</th>
-                    <th>Tipo</th>
-                    <th>API URL</th>
-                    <th>Respuesta</th>
-                    <th>Estado</th>
-                    <th>Apertura</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <!-- Filled dynamically -->
-                  <tr>
-                    <td colspan="7" class="text-center">Cargando historial...</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       </div>
     </main>
+
+    <!-- Recent Activity Logs (Full Width) -->
+    <section class="logs-section" style="width: 100%; margin-top: 1.5rem;">
+      <div class="panel glass">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i data-lucide="history"></i>
+            <h2>Historial de Accesos Recientes</h2>
+          </div>
+          <button id="btn-clear-db-logs" class="btn btn-icon-only text-danger" title="Limpiar Historial">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="table-container" style="max-height: 450px;">
+            <table class="data-table" id="logs-table">
+              <thead>
+                <tr>
+                  <th style="width: 15%;">Fecha/Hora</th>
+                  <th style="width: 15%;">Usuario</th>
+                  <th style="width: 10%;">Tipo</th>
+                  <th style="width: 32%;">API URL</th>
+                  <th style="width: 12%;">Respuesta</th>
+                  <th style="width: 8%;">Estado</th>
+                  <th style="width: 8%;">Apertura</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Filled dynamically -->
+                <tr>
+                  <td colspan="7" class="text-center">Cargando historial...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script src="app.js"></script>
