@@ -114,9 +114,7 @@ async function processAccessRequest(reqInfo, clientIp) {
   logEvent('info', `Tipo de verificación: ${eventType}`);
 
   if (!userId) {
-    logEvent('error', 'Rechazado: ID de usuario no proporcionado en la solicitud.');
-    await dbHelper.addLog(null, 'Desconocido', eventType, 'N/A', { error: 'No User ID found' }, false, false);
-    broadcastFeedback(false, 'Desconocido', null, 'ID de usuario no proporcionado');
+    logEvent('info', `Evento de hardware sin credencial (Serial: ${serialNo}). Omitiendo validación.`);
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
@@ -256,6 +254,37 @@ const handleDevicePOST = async (req, res) => {
 
   if (reqInfo.isHeartbeat) {
     console.log(`[DEBUG] Heartbeat recibido del dispositivo IP: ${clientIp}`);
+    
+    const isJsonRequested = req.url.includes('format=json') || 
+                            (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
+                            (req.rawBody && req.rawBody.includes('application/json'));
+
+    if (isJsonRequested) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).json({
+        ResponseStatus: {
+          requestURL: req.url || '/',
+          statusCode: 1,
+          statusString: "OK",
+          subStatusCode: "ok"
+        }
+      });
+    } else {
+      res.setHeader('Content-Type', 'application/xml');
+      const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<ResponseStatus version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+    <requestURL>${req.url || '/'}</requestURL>
+    <statusCode>1</statusCode>
+    <statusString>OK</statusString>
+    <subStatusCode>ok</subStatusCode>
+</ResponseStatus>`;
+      return res.status(200).send(xmlResponse);
+    }
+  }
+
+  // Si no contiene ID de usuario, es un evento de hardware auxiliar (puerta abierta, cerrada, etc.)
+  if (!reqInfo.userId) {
+    console.log(`[INFO Hardware] Evento de hardware auxiliar recibido (Serial: ${reqInfo.serialNo}, Modo: ${reqInfo.eventType}). Confirmando recepción sin alterar pantalla.`);
     
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||

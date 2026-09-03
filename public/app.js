@@ -111,6 +111,10 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshUsers() {
     try {
       const res = await fetch(API_USERS);
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
       usersList = await res.json();
       renderUsersTable();
       populateSimulatorOptions();
@@ -123,6 +127,10 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshLogs() {
     try {
       const res = await fetch(API_LOGS);
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
       logsList = await res.json();
       renderLogsTable();
       updateMetrics();
@@ -134,6 +142,10 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshSettings() {
     try {
       const res = await fetch(API_SETTINGS);
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
       const settings = await res.json();
       
       document.getElementById('setting-device-ip').value = settings.device_ip || '';
