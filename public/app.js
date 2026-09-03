@@ -344,33 +344,54 @@ document.addEventListener('DOMContentLoaded', () => {
   userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const dbId = userDbIdInput.value;
-    const userData = {
-      user_id: userIdInput.value.trim(),
-      name: userNameInput.value.trim(),
-      api_url: userApiUrlInput.value.trim()
-    };
+    
+    // Construct FormData to handle multipart text and files
+    const formData = new FormData();
+    formData.append('user_id', userIdInput.value.trim());
+    formData.append('name', userNameInput.value.trim());
+    formData.append('api_url', userApiUrlInput.value.trim());
+    
+    const faceInput = document.getElementById('user-face-image');
+    if (faceInput && faceInput.files && faceInput.files[0]) {
+      const file = faceInput.files[0];
+      // Hikvision device is very strict about size (< 200KB)
+      if (file.size > 200 * 1024) {
+        alert("La imagen de rostro debe ser inferior a 200 KB para que el lector biométrico pueda procesarla.");
+        return;
+      }
+      formData.append('faceImage', file);
+    }
 
     const isEdit = dbId !== '';
     const url = isEdit ? `${API_USERS}/${dbId}` : API_USERS;
     const method = isEdit ? 'PUT' : 'POST';
 
     try {
+      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} usuario "${userNameInput.value.trim()}"...`);
       const res = await fetch(url, {
         method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(userData)
+        body: formData // Let the browser set the proper Multipart boundary
       });
 
+      const responseData = await res.json();
+
       if (res.ok) {
-        appendConsoleLog('success', `${isEdit ? 'Usuario actualizado' : 'Usuario creado'} con éxito: ${userData.name}`);
+        if (responseData.syncError) {
+          appendConsoleLog('warning', `Guardado local exitoso, pero biométrico reportó: ${responseData.syncError}`);
+          alert(`Guardado localmente. Advertencia del biométrico: ${responseData.syncError}`);
+        } else if (responseData.synced) {
+          appendConsoleLog('success', `Usuario "${userNameInput.value.trim()}" sincronizado correctamente en el biométrico.`);
+        } else {
+          appendConsoleLog('success', `Usuario "${userNameInput.value.trim()}" guardado localmente (biométrico no configurado).`);
+        }
         hideUserForm();
         refreshUsers();
       } else {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Error al guardar');
+        throw new Error(responseData.error || 'Error al guardar');
       }
     } catch (err) {
       alert(`Error al guardar: ${err.message}`);
+      appendConsoleLog('error', `Fallo al guardar: ${err.message}`);
     }
   });
 
@@ -380,10 +401,14 @@ document.addEventListener('DOMContentLoaded', () => {
       device_ip: document.getElementById('setting-device-ip').value.trim(),
       device_port: document.getElementById('setting-device-port').value.trim(),
       device_user: document.getElementById('setting-device-user').value.trim(),
-      device_password: document.getElementById('setting-device-password').value,
       device_door_channel: document.getElementById('setting-device-door').value.trim(),
       enable_device_api_open: document.getElementById('setting-enable-api-open').checked ? 'true' : 'false'
     };
+
+    const devicePasswordInput = document.getElementById('setting-device-password');
+    if (devicePasswordInput && devicePasswordInput.value.trim() !== '') {
+      data.device_password = devicePasswordInput.value;
+    }
 
     const adminPasswordInput = document.getElementById('setting-admin-password');
     if (adminPasswordInput && adminPasswordInput.value.trim() !== '') {

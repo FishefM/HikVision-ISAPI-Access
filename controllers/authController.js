@@ -3,7 +3,7 @@ const { currentSessionToken } = require('../middleware/auth');
 const { logEvent } = require('../utils/logger');
 
 /**
- * Handles administrator dashboard login requests.
+ * Handle Dashboard de Administracion
  */
 async function login(req, res) {
   const { password } = req.body;
@@ -15,12 +15,11 @@ async function login(req, res) {
     if (password === correctPassword) {
       logEvent('info', 'Inicio de sesión de administrador exitoso.');
       
-      // Issue HttpOnly secure session cookie
       res.cookie('admin_session', currentSessionToken, {
         httpOnly: true,
-        secure: false, // Set to true if running over HTTPS
+        secure: false, 
         sameSite: 'strict',
-        maxAge: 3600000 // 1 hour session duration
+        maxAge: 3600000 // 1 hora de sesion
       });
       
       return res.json({ success: true });
@@ -35,7 +34,7 @@ async function login(req, res) {
 }
 
 /**
- * Handles administrator dashboard logout requests.
+ * Handle logout request
  */
 function logout(req, res) {
   logEvent('info', 'Cierre de sesión de administrador solicitado.');

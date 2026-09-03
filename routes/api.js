@@ -11,10 +11,13 @@ const { logEvent, sseClients } = require('../utils/logger');
 router.post('/login', authController.login);
 router.post('/logout', authController.logout);
 
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+
 // User DB routes
 router.get('/users', userController.getUsers);
-router.post('/users', userController.addUser);
-router.put('/users/:id', userController.updateUser);
+router.post('/users', upload.single('faceImage'), userController.addUser);
+router.put('/users/:id', upload.single('faceImage'), userController.updateUser);
 router.delete('/users/:id', userController.deleteUser);
 
 // Settings routes

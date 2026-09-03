@@ -1,5 +1,8 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const https = require('https');
+
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function md5(str) {
   return crypto.createHash('md5').update(str).digest('hex');
@@ -10,12 +13,23 @@ function md5(str) {
  */
 function parseWWWAuthenticate(header) {
   if (!header) return {};
-  const parts = header.substring(7).split(/,\s*/);
+  const headerStr = Array.isArray(header)
+    ? (header.find(h => String(h).toLowerCase().startsWith('digest')) || header[0])
+    : String(header);
+
+  const match = headerStr.match(/^digest\s+(.*)$/i);
+  if (!match) return {};
+
+  const cleanHeader = match[1];
+  // Split on commas that are followed by a key= (avoids breaking qop="auth,auth-int")
+  const parts = cleanHeader.split(/,\s*(?=[a-zA-Z0-9_-]+\s*=)/);
   const params = {};
   for (const part of parts) {
-    const [key, rawValue] = part.split('=');
-    if (key && rawValue) {
-      params[key.trim()] = rawValue.replace(/"/g, '').trim();
+    const eqIdx = part.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = part.slice(0, eqIdx).trim();
+      const val = part.slice(eqIdx + 1).replace(/^["']|["']$/g, '').trim();
+      params[key] = val;
     }
   }
   return params;
@@ -27,7 +41,9 @@ function parseWWWAuthenticate(header) {
 function calculateDigestHeader(method, uri, authParams, username, password) {
   const realm = authParams.realm;
   const nonce = authParams.nonce;
-  const qop = authParams.qop;
+  const rawQop = authParams.qop;
+  // If server offers auth,auth-int, choose 'auth'
+  const qop = rawQop && rawQop.includes('auth') ? 'auth' : rawQop;
   const opaque = authParams.opaque;
   
   const HA1 = md5(`${username}:${realm}:${password}`);
@@ -50,6 +66,9 @@ function calculateDigestHeader(method, uri, authParams, username, password) {
   if (opaque) {
     authHeader += `, opaque="${opaque}"`;
   }
+  if (authParams.algorithm) {
+    authHeader += `, algorithm=${authParams.algorithm}`;
+  }
   return authHeader;
 }
 
@@ -57,10 +76,13 @@ function calculateDigestHeader(method, uri, authParams, username, password) {
  * Sends a generic command to the Hikvision device using manual Digest Authentication.
  */
 async function sendISAPICommand(deviceIp, devicePort, username, password, method, path, xmlBody = null) {
-  const url = `http://${deviceIp}:${devicePort}${path}`;
+  const isHttps = String(devicePort) === '443';
+  const protocol = isHttps ? 'https' : 'http';
+  const url = `${protocol}://${deviceIp}:${devicePort}${path}`;
   const config = {
     method: method,
     url: url,
+    httpsAgent: isHttps ? httpsAgent : undefined,
     headers: {
       'Content-Type': 'application/xml',
     },
@@ -132,7 +154,176 @@ async function openDoor(deviceIp, devicePort, username, password, doorChannel = 
   }
 }
 
+/**
+ * Sends a generic command to the Hikvision device using manual Digest Authentication and custom headers/body.
+ */
+async function sendISAPIGenericRequest(deviceIp, devicePort, username, password, method, path, headers = {}, data = null) {
+  const url = `http://${deviceIp}:${devicePort}${path}`;
+  const config = {
+    method: method,
+    url: url,
+    headers: { ...headers },
+    data: data,
+    validateStatus: (status) => status >= 200 && status < 500, // Permit 401 response for digest challenge
+    timeout: 10000, // 10 second timeout (face upload might take longer)
+  };
+
+  try {
+    console.log(`[Device API] Sending generic ${method} to ${url}...`);
+    let response = await axios(config);
+    
+    if (response.status === 401) {
+      console.log(`[Device API] Received 401 challenge. Calculating Digest...`);
+      const authHeaderRaw = response.headers['www-authenticate'];
+      if (!authHeaderRaw) {
+        throw new Error('401 Unauthorized received, but WWW-Authenticate header was missing.');
+      }
+      
+      const authParams = parseWWWAuthenticate(authHeaderRaw);
+      const authHeader = calculateDigestHeader(method, path, authParams, username, password);
+      
+      config.headers['Authorization'] = authHeader;
+      console.log(`[Device API] Retrying ${method} with Digest Authentication...`);
+      response = await axios(config);
+    }
+    
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      data: response.data
+    };
+  } catch (error) {
+    console.error(`[Device API] Connection error: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Adds or updates a user record on the Hikvision device.
+ */
+async function syncUserInfo(deviceIp, devicePort, username, password, userId, name) {
+  const path = `/ISAPI/AccessControl/UserInfo/SetUp?format=json`;
+  
+  // Format dates for Valid block
+  const payload = {
+    UserInfo: {
+      employeeNo: String(userId),
+      name: name,
+      userType: "normal",
+      Valid: {
+        enable: true,
+        beginTime: "2026-01-01T00:00:00",
+        endTime: "2046-01-01T23:59:59",
+        timeType: "local"
+      },
+      belongGroup: "1",
+      doorRight: "1",
+      RightPlan: [
+        {
+          doorNo: 1,
+          planTemplateNo: "1"
+        }
+      ]
+    }
+  };
+
+  try {
+    const result = await sendISAPIGenericRequest(
+      deviceIp,
+      devicePort,
+      username,
+      password,
+      'PUT',
+      path,
+      { 'Content-Type': 'application/json' },
+      payload
+    );
+
+    console.log(`[Device API] User sync response: ${JSON.stringify(result.data)}`);
+    
+    // Check for success code or message
+    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+
+    return {
+      success: isSuccess,
+      status: result.status,
+      data: result.data
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Uploads a user face image to the Hikvision device.
+ */
+async function syncUserFace(deviceIp, devicePort, username, password, userId, imageBuffer) {
+  const path = `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`;
+  const boundary = '----Boundary' + crypto.randomBytes(8).toString('hex');
+  
+  const jsonPart = JSON.stringify({
+    faceLibType: "normalFD",
+    FDID: "1",
+    FPID: String(userId)
+  });
+
+  const parts = [];
+  parts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="FaceDataRecord"\r\n` +
+    `Content-Type: application/json\r\n\r\n` +
+    `${jsonPart}\r\n`
+  ));
+
+  parts.push(Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="faceImage"; filename="${userId}.jpg"\r\n` +
+    `Content-Type: image/jpeg\r\n\r\n`
+  ));
+
+  parts.push(imageBuffer);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  const requestBody = Buffer.concat(parts);
+
+  try {
+    const result = await sendISAPIGenericRequest(
+      deviceIp,
+      devicePort,
+      username,
+      password,
+      'POST',
+      path,
+      { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      requestBody
+    );
+
+    console.log(`[Device API] Face upload response: ${JSON.stringify(result.data)}`);
+
+    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+
+    return {
+      success: isSuccess,
+      status: result.status,
+      data: result.data
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 module.exports = {
   sendISAPICommand,
-  openDoor
+  openDoor,
+  sendISAPIGenericRequest,
+  syncUserInfo,
+  syncUserFace
 };

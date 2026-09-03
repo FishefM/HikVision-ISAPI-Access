@@ -4,8 +4,10 @@ const deviceHelper = require('../utils/device');
 const { logEvent, broadcastFeedback } = require('../utils/logger');
 
 /**
- * Extract User ID and Serial Number from the request.
- * Uses formal parsed body, but falls back to regex search over rawBody for high reliability.
+ * Extrae el user ID y el número de serie de la solicitud del dispositivo.
+ * Usa una combinación de análisis XML/JSON y búsqueda con expresiones regulares para manejar diferentes formatos de solicitud.
+ * @param {Object} req - Objeto de solicitud Express.
+ * @returns {Object} - Contiene userId, serialNo, eventType y isHeartbeat. 
  */
 function extractDeviceRequestInfo(req) {
   let userId = null;
@@ -13,13 +15,13 @@ function extractDeviceRequestInfo(req) {
   let eventType = 'unknown';
   let isHeartbeat = false;
 
-  // Detect heartbeat from rawBody or parsed body
+  // Detecta si la solicitud es un latido (heartbeat)
   if (req.rawBody && (req.rawBody.includes('"heartBeat"') || req.rawBody.includes('"heartbeat"') || req.rawBody.includes('heartBeat') || req.rawBody.includes('heartbeat') || req.rawBody.includes('HEARTBEAT'))) {
     isHeartbeat = true;
     eventType = 'heartBeat';
   }
 
-  // 1. Check formal parsed XML or JSON
+  // XML/JSON Parsing: Intenta analizar la solicitud como JSON o XML para extraer userId y serialNo
   if (req.body) {
     const root = req.body.AccessControllerEvent || req.body.EventNotificationAlert || req.body;
     
@@ -38,7 +40,7 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
-  // 2. Fallback to Regex search in case of multipart or parse issues (only if not a heartbeat)
+  // Fallback: Si no se encuentra userId, intenta extraerlo usando expresiones regulares desde el cuerpo sin procesar
   if (!isHeartbeat && !userId && req.rawBody) {
     // Try employeeNoString
     const employeeNoMatch = req.rawBody.match(/<employeeNoString[^>]*>([^<]+)<\/employeeNoString>/) || 
@@ -69,8 +71,11 @@ function extractDeviceRequestInfo(req) {
 }
 
 /**
- * Main verification controller.
- * Processes the access request, checks DB, queries user's custom API, and triggers door.
+ * Controlador principal de verificacion
+ * Solicitud de acceso, consulta a la base de datos, llama a la API externa del usuario, registra el resultado y envía retroalimentación al dispositivo.
+ * @param {Object} reqInfo - Información extraída de la solicitud del dispositivo (userId, serialNo, eventType).
+ * @param {string} clientIp - Dirección IP del dispositivo que envió la solicitud.
+ * @returns {Object} - Resultado de la verificación (authorized, name, serialNo, doorOpened, reason).
  */
 async function processAccessRequest(reqInfo, clientIp) {
   const { userId, serialNo, eventType } = reqInfo;
@@ -88,7 +93,7 @@ async function processAccessRequest(reqInfo, clientIp) {
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
-  // 1. Check SQLite database for user
+  // Checar la base de datos local para el usuario
   logEvent('info', `Consultando base de datos para el usuario ID: ${userId}...`);
   const user = await dbHelper.getUserById(userId);
 
@@ -101,7 +106,7 @@ async function processAccessRequest(reqInfo, clientIp) {
 
   logEvent('success', `Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`);
 
-  // 2. Query the user's custom API
+  // Query para la API externa del usuario
   logEvent('info', `Llamando a la API externa de validación...`);
   let authorized = false;
   let apiResponse = null;
@@ -144,9 +149,9 @@ async function processAccessRequest(reqInfo, clientIp) {
         authorized = true;
       } else if (apiResponse.message && 
                 (apiResponse.message.toLowerCase().includes('asistencia') || 
-                 apiResponse.message.toLowerCase().includes('registrada') || 
-                 apiResponse.message.toLowerCase().includes('éxito') ||
-                 apiResponse.message.toLowerCase().includes('exito'))) {
+                apiResponse.message.toLowerCase().includes('registrada') || 
+                apiResponse.message.toLowerCase().includes('éxito') ||
+                apiResponse.message.toLowerCase().includes('exito'))) {
         authorized = true;
       }
     }
@@ -163,14 +168,14 @@ async function processAccessRequest(reqInfo, clientIp) {
     }
   }
 
-  // 3. Log the decision
+  // Log
   if (authorized) {
     logEvent('success', `ACCESO AUTORIZADO para el usuario ${user.name} (ID: ${userId})`);
   } else {
     logEvent('warning', `ACCESO DENEGADO para el usuario ${user.name} (ID: ${userId})`);
   }
 
-  // 4. Trigger door release on the device (if enabled in settings)
+  // Trigger la puerta se abre si está autorizado y la configuración lo permite
   let doorOpened = false;
   const settings = await dbHelper.getSettings();
   
@@ -194,10 +199,10 @@ async function processAccessRequest(reqInfo, clientIp) {
     logEvent('info', `Apertura por API de dispositivo omitida (está desactivada o requiere respuesta HTTP directa).`);
   }
 
-  // Write log to DB
+  // Log DB
   await dbHelper.addLog(userId, user.name, eventType, user.api_url, apiResponse, authorized, doorOpened);
 
-  // Determine deny reason if any
+  // Determinar la razon de denegacion y la retroalimentacion de la pantalla de feedback
   let denyReason = 'Acceso Autorizado';
   if (!authorized) {
     if (apiResponse && apiResponse.message) {
@@ -209,24 +214,22 @@ async function processAccessRequest(reqInfo, clientIp) {
     }
   }
 
-  // Send feedback event to dedicated screen
+  // Envia el Feedback
   broadcastFeedback(authorized, user.name, userId, denyReason);
 
   return { authorized, name: user.name, serialNo, doorOpened, reason: denyReason };
 }
 
 /**
- * Handle incoming Hikvision device POST event packets
+ * Handle en el dispositivo Hikvision
  */
 const handleDevicePOST = async (req, res) => {
   const reqInfo = extractDeviceRequestInfo(req);
   const clientIp = req.ip || req.connection.remoteAddress;
 
-  // Handle Heartbeat silently to avoid cluttering logs and DB
   if (reqInfo.isHeartbeat) {
     console.log(`[DEBUG] Heartbeat recibido del dispositivo IP: ${clientIp}`);
     
-    // Check if JSON or XML response format is expected
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
                             (req.rawBody && req.rawBody.includes('application/json'));
@@ -257,7 +260,7 @@ const handleDevicePOST = async (req, res) => {
   try {
     const result = await processAccessRequest(reqInfo, clientIp);
 
-    // Return the response in the format requested by the device (XML or JSON)
+    // Retorna la respuesta en el formato solicitado (JSON o XML)
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json'));
 
@@ -270,7 +273,7 @@ const handleDevicePOST = async (req, res) => {
         }
       });
     } else {
-      // Default to XML
+      // XML Response
       res.setHeader('Content-Type', 'application/xml');
       const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <RemoteCheck version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
@@ -286,7 +289,7 @@ const handleDevicePOST = async (req, res) => {
 };
 
 /**
- * Handles test scans sent from the simulator dashboard.
+ * Escaneos simulados
  */
 async function testScan(req, res) {
   const { userId, eventType } = req.body;
@@ -309,9 +312,8 @@ async function testScan(req, res) {
   }
 }
 
-// ----------------------------------------------------
-// Mock External APIs for local testing
-// ----------------------------------------------------
+// Mocks de la API externa para pruebas
+
 function mockExternalApiAllow(req, res) {
   const { userId } = req.query;
   res.json({

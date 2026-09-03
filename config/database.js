@@ -13,7 +13,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 function initializeDatabase() {
   db.serialize(() => {
-    // Create Users table
+    // Crear tabla de Base de usauarios
     db.run(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,7 +24,7 @@ function initializeDatabase() {
       )
     `);
 
-    // Create Access Logs table
+    // Crear tabla de logs de acceso
     db.run(`
       CREATE TABLE IF NOT EXISTS access_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +39,7 @@ function initializeDatabase() {
       )
     `);
 
-    // Create Settings table
+    // Crear tabla de configuración
     db.run(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -47,7 +47,7 @@ function initializeDatabase() {
       )
     `);
 
-    // Insert dummy users if empty (seed data)
+    // Insertar datos de ejemplo en la tabla de usuarios si está vacía
     db.all("SELECT COUNT(*) as count FROM users", [], (err, rows) => {
       if (!err && rows[0].count === 0) {
         console.log('Inserting seed data into users table...');
@@ -61,28 +61,28 @@ function initializeDatabase() {
       }
     });
 
-    // Insert default settings if empty
+    // Insertar configuración predeterminada si la tabla está vacía
     db.all("SELECT COUNT(*) as count FROM settings", [], (err, rows) => {
       if (!err && rows[0].count === 0) {
         console.log('Initializing default settings...');
         const stmt = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
-        stmt.run("device_ip", "192.168.1.100");
+        stmt.run("device_ip", "192.168.100.8");
         stmt.run("device_port", "80");
         stmt.run("device_user", "admin");
-        stmt.run("device_password", "Admin12345");
+        stmt.run("device_password", "CON150602CJ1*");
         stmt.run("device_door_channel", "1");
-        stmt.run("enable_device_api_open", "false"); 
+        stmt.run("enable_device_api_open", "true"); 
         stmt.run("admin_password", "admin123");
         stmt.finalize();
       } else if (!err) {
-        // Ensure admin_password exists even if settings are already seeded
+        // Asegurarse de que la configuración predeterminada esté presente
         db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')");
       }
     });
   });
 }
 
-// User methods
+// Metodos de Usuarios
 const getUsers = () => new Promise((res, rej) => {
   db.all("SELECT * FROM users ORDER BY id DESC", [], (err, rows) => err ? rej(err) : res(rows));
 });
@@ -112,7 +112,7 @@ const deleteUser = (id) => new Promise((res, rej) => {
   });
 });
 
-// Logs methods
+// Metodos de Logs
 const getLogs = () => new Promise((res, rej) => {
   db.all("SELECT * FROM access_logs ORDER BY id DESC LIMIT 50", [], (err, rows) => err ? rej(err) : res(rows));
 });

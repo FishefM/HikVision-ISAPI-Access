@@ -3,7 +3,7 @@ const deviceHelper = require('../utils/device');
 const { logEvent } = require('../utils/logger');
 
 /**
- * Retrieves the current reader and administration settings.
+ * Obtiene configuraciones
  */
 async function getSettings(req, res) {
   try {
@@ -19,11 +19,19 @@ async function getSettings(req, res) {
 }
 
 /**
- * Updates settings keys in the database.
+ * Update configuraciones
  */
 async function updateSettings(req, res) {
   try {
-    await dbHelper.updateSettings(req.body);
+    const data = { ...req.body };
+    // Prevent empty password inputs from wiping out existing passwords
+    if (!data.device_password || String(data.device_password).trim() === '') {
+      delete data.device_password;
+    }
+    if (!data.admin_password || String(data.admin_password).trim() === '') {
+      delete data.admin_password;
+    }
+    await dbHelper.updateSettings(data);
     logEvent('info', 'Configuración de dispositivo y acceso actualizada.');
     res.json({ success: true });
   } catch (e) {
@@ -32,7 +40,7 @@ async function updateSettings(req, res) {
 }
 
 /**
- * Triggers a manual door release command by sending an ISAPI request to the Hikvision terminal.
+ * Trigger Para apertura manual
  */
 async function openDoor(req, res) {
   try {
@@ -72,7 +80,7 @@ async function openDoor(req, res) {
 }
 
 /**
- * Clears all access logs from the database.
+ * Boton Eliminar Logs
  */
 async function clearLogs(req, res) {
   try {
@@ -85,7 +93,7 @@ async function clearLogs(req, res) {
 }
 
 /**
- * Retrieves the 50 most recent access logs from the database.
+ * Retorna los ultimos logs de la BD
  */
 async function getLogs(req, res) {
   try {

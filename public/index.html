@@ -225,7 +225,11 @@
                 <div class="form-group">
                   <label for="user-api-url">API URL Relacionada</label>
                   <input type="url" id="user-api-url" class="form-input" required placeholder="http://api.empresa.com/verify">
-                  <small class="helper-text">La API externa recibirá `?userId=...` y debe responder `{"authorized": true}`</small>
+                </div>
+                <div class="form-group">
+                  <label for="user-face-image">Foto de Rostro (Opcional - JPG &lt; 200KB)</label>
+                  <input type="file" id="user-face-image" class="form-input" accept="image/jpeg,image/jpg" style="padding: 0.5rem 0.75rem; line-height: 1;">
+                  <small class="helper-text">Si subes una foto, se sincronizará con el biométrico local.</small>
                 </div>
                 <div class="btn-group justify-end">
                   <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>
