@@ -15,15 +15,27 @@ function extractDeviceRequestInfo(req) {
   let eventType = 'unknown';
   let isHeartbeat = false;
 
+  // Imprimir resumen del cuerpo recibido para facilitar depuración
+  if (req.rawBody) {
+    const preview = req.rawBody.length > 300 ? req.rawBody.substring(0, 300) + '... [TRUNCATED]' : req.rawBody;
+    console.log(`[DEBUG Request Hikvision (${req.headers['content-type'] || 'sin content-type'})]:\n${preview}`);
+  } else {
+    console.log(`[DEBUG Request Hikvision]: Cuerpo vacío o no capturado. Content-Type: ${req.headers['content-type']}`);
+  }
+
   // Detecta si la solicitud es un latido (heartbeat)
-  if (req.rawBody && (req.rawBody.includes('"heartBeat"') || req.rawBody.includes('"heartbeat"') || req.rawBody.includes('heartBeat') || req.rawBody.includes('heartbeat') || req.rawBody.includes('HEARTBEAT'))) {
+  if (req.rawBody && /heartbeat/i.test(req.rawBody)) {
     isHeartbeat = true;
     eventType = 'heartBeat';
   }
 
   // XML/JSON Parsing: Intenta analizar la solicitud como JSON o XML para extraer userId y serialNo
   if (req.body) {
-    const root = req.body.AccessControllerEvent || req.body.EventNotificationAlert || req.body;
+    const root = req.body.AccessControllerEvent || 
+                 req.body.EventNotificationAlert || 
+                 req.body.RemoteCheck || 
+                 req.body.remoteCheck || 
+                 req.body;
     
     if (root) {
       if (root.eventType === 'heartBeat' || root.eventDescription === 'heartBeat' || root.eventType === 'heartbeat') {
@@ -32,7 +44,7 @@ function extractDeviceRequestInfo(req) {
       }
       
       if (!isHeartbeat) {
-        userId = root.employeeNoString || root.cardNo || root.userId || root.userNo;
+        userId = root.employeeNoString || root.cardNo || root.userId || root.userNo || root.employeeNo;
         if (root.serialNo) serialNo = String(root.serialNo);
         if (root.currentVerifyMode) eventType = root.currentVerifyMode;
         else if (root.eventType) eventType = root.eventType;
@@ -41,29 +53,44 @@ function extractDeviceRequestInfo(req) {
   }
 
   // Fallback: Si no se encuentra userId, intenta extraerlo usando expresiones regulares desde el cuerpo sin procesar
-  if (!isHeartbeat && !userId && req.rawBody) {
-    // Try employeeNoString
-    const employeeNoMatch = req.rawBody.match(/<employeeNoString[^>]*>([^<]+)<\/employeeNoString>/) || 
-                            req.rawBody.match(/"employeeNoString"\s*:\s*["']?([^"',\s}]+)["']?/);
-    if (employeeNoMatch && employeeNoMatch[1]) {
-      userId = employeeNoMatch[1].trim();
+  if (!isHeartbeat && req.rawBody) {
+    // 1. Extraer employeeNoString o employeeNo o userNo
+    if (!userId) {
+      const employeeNoMatch = req.rawBody.match(/<employeeNoString[^>]*>([^<]+)<\/employeeNoString>/i) || 
+                              req.rawBody.match(/"employeeNoString"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                              req.rawBody.match(/<employeeNo[^>]*>([^<]+)<\/employeeNo>/i) ||
+                              req.rawBody.match(/"employeeNo"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                              req.rawBody.match(/<userNo[^>]*>([^<]+)<\/userNo>/i) ||
+                              req.rawBody.match(/"userNo"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (employeeNoMatch && employeeNoMatch[1]) {
+        userId = employeeNoMatch[1].trim();
+      }
     }
     
-    // Try cardNo
+    // 2. Extraer cardNo
     if (!userId) {
-      const cardNoMatch = req.rawBody.match(/<cardNo[^>]*>([^<]+)<\/cardNo>/) || 
-                          req.rawBody.match(/"cardNo"\s*:\s*["']?([^"',\s}]+)["']?/);
+      const cardNoMatch = req.rawBody.match(/<cardNo[^>]*>([^<]+)<\/cardNo>/i) || 
+                          req.rawBody.match(/"cardNo"\s*:\s*["']?([^"',\s}]+)["']?/i);
       if (cardNoMatch && cardNoMatch[1]) {
         userId = cardNoMatch[1].trim();
         eventType = 'card';
       }
     }
 
-    // Try serialNo
-    const serialMatch = req.rawBody.match(/<serialNo[^>]*>([^<]+)<\/serialNo>/) || 
-                        req.rawBody.match(/"serialNo"\s*:\s*["']?([^"',\s}]+)["']?/);
+    // 3. Extraer serialNo
+    const serialMatch = req.rawBody.match(/<serialNo[^>]*>([^<]+)<\/serialNo>/i) || 
+                        req.rawBody.match(/"serialNo"\s*:\s*["']?([^"',\s}]+)["']?/i);
     if (serialMatch && serialMatch[1]) {
       serialNo = serialMatch[1].trim();
+    }
+
+    // 4. Extraer currentVerifyMode
+    if (eventType === 'unknown') {
+      const modeMatch = req.rawBody.match(/<currentVerifyMode[^>]*>([^<]+)<\/currentVerifyMode>/i) ||
+                        req.rawBody.match(/"currentVerifyMode"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (modeMatch && modeMatch[1]) {
+        eventType = modeMatch[1].trim();
+      }
     }
   }
 

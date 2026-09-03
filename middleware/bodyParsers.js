@@ -6,6 +6,45 @@ const { logEvent } = require('../utils/logger');
  * Configure the multi-format body parsers on the Express application.
  */
 function configureBodyParsers(app) {
+  // 0. Capturar el stream crudo para rutas del lector Hikvision (multipart, streams raw, XML o JSON)
+  app.use((req, res, next) => {
+    const isDeviceRoute = 
+      req.path === '/' || 
+      req.path === '/event' || 
+      req.path === '/api/event' || 
+      req.path.startsWith('/ISAPI') || 
+      req.path === '/remoteCheck';
+
+    const contentType = req.headers['content-type'] || '';
+    const isMultipart = contentType.includes('multipart/');
+    const isUserUpload = req.path.startsWith('/api/users');
+
+    // Capturar si es ruta del lector o multipart (excepto carga de usuarios en panel administrativo)
+    if ((isDeviceRoute || (isMultipart && !isUserUpload)) && ['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      const chunks = [];
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        req.rawBody = buf.toString('utf8');
+        
+        // Intentar parsear automáticamente si es JSON o XML
+        if (contentType.includes('application/json')) {
+          try { req.body = JSON.parse(req.rawBody); } catch (e) {}
+        } else if (contentType.includes('/xml') || contentType.includes('+xml') || req.rawBody.trim().startsWith('<')) {
+          xml2js.parseString(req.rawBody, { explicitArray: false, mergeAttrs: true }, (err, result) => {
+            if (!err && result) req.body = result;
+            next();
+          });
+          return;
+        }
+        next();
+      });
+      req.on('error', next);
+      return;
+    }
+    next();
+  });
+
   // 1. JSON body parser with raw body verification
   app.use(express.json({
     verify: (req, res, buf) => {
