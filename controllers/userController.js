@@ -53,6 +53,16 @@ async function addUser(req, res) {
           synced = true;
           logEvent('success', `Usuario ${name} sincronizado con éxito en el biométrico.`);
           
+          // Sincronizar tarjeta con el biométrico
+          await deviceHelper.syncCardInfo(
+            settings.device_ip,
+            settings.device_port || 80,
+            settings.device_user,
+            settings.device_password,
+            user_id,
+            user_id
+          ).catch(err => console.warn('Card sync error:', err.message));
+
           // Rostro
           if (req.file && req.file.buffer) {
             logEvent('info', `Subiendo imagen de rostro para ID: ${user_id} al biométrico...`);
@@ -133,6 +143,16 @@ async function updateUser(req, res) {
           synced = true;
           logEvent('success', `Usuario ${name} actualizado con éxito en el biométrico.`);
           
+          // Sincronizar tarjeta con el biométrico
+          await deviceHelper.syncCardInfo(
+            settings.device_ip,
+            settings.device_port || 80,
+            settings.device_user,
+            settings.device_password,
+            user_id,
+            user_id
+          ).catch(err => console.warn('Card sync error:', err.message));
+
           // Sincronizacion de imagen
           if (req.file && req.file.buffer) {
             logEvent('info', `Subiendo/Actualizando imagen de rostro para ID: ${user_id} al biométrico...`);

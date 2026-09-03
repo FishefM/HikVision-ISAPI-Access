@@ -259,6 +259,40 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
 }
 
 /**
+ * Adds or updates a card record on the Hikvision device linked to the employeeNo.
+ */
+async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo, cardNo) {
+  const path = `/ISAPI/AccessControl/CardInfo/SetUp?format=json`;
+  const payload = {
+    CardInfo: {
+      employeeNo: String(employeeNo),
+      cardNo: String(cardNo),
+      cardType: "normalCard"
+    }
+  };
+
+  try {
+    const result = await sendISAPIGenericRequest(
+      deviceIp,
+      devicePort,
+      username,
+      password,
+      'PUT',
+      path,
+      { 'Content-Type': 'application/json' },
+      payload
+    );
+    console.log(`[Device API] Card sync response: ${JSON.stringify(result.data)}`);
+    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    return { success: isSuccess, status: result.status, data: result.data };
+  } catch (error) {
+    console.warn(`[Device API] Failed to sync card: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Uploads a user face image to the Hikvision device.
  */
 async function syncUserFace(deviceIp, devicePort, username, password, userId, imageBuffer) {
@@ -358,6 +392,7 @@ module.exports = {
   openDoor,
   sendISAPIGenericRequest,
   syncUserInfo,
+  syncCardInfo,
   syncUserFace,
   sendRemoteCheck
 };
