@@ -320,10 +320,44 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
   }
 }
 
+/**
+ * Sends a RemoteCheck decision back to the Hikvision terminal (PUT /ISAPI/AccessControl/remoteCheck).
+ * This tells the terminal's screen and voice synthesizer that the verification was successful,
+ * displaying the green checkmark on the physical device and playing "Verificado" / "Acceso Concedido".
+ */
+async function sendRemoteCheck(deviceIp, devicePort, username, password, serialNo, authorized = true) {
+  const path = `/ISAPI/AccessControl/remoteCheck?format=json`;
+  const payload = {
+    RemoteCheck: {
+      serialNo: parseInt(serialNo) || 1,
+      checkResult: authorized ? "success" : "failed"
+    }
+  };
+
+  try {
+    const result = await sendISAPIGenericRequest(
+      deviceIp,
+      devicePort,
+      username,
+      password,
+      'PUT',
+      path,
+      { 'Content-Type': 'application/json' },
+      payload
+    );
+    console.log(`[Device API] RemoteCheck result sent (Serial: ${serialNo}, Result: ${authorized ? 'success' : 'failed'}): Status ${result.status}`);
+    return { success: result.status === 200, status: result.status, data: result.data };
+  } catch (error) {
+    console.warn(`[Device API] Failed to send PUT RemoteCheck: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
   sendISAPICommand,
   openDoor,
   sendISAPIGenericRequest,
   syncUserInfo,
-  syncUserFace
+  syncUserFace,
+  sendRemoteCheck
 };

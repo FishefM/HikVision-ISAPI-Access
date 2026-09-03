@@ -204,6 +204,18 @@ async function processAccessRequest(reqInfo, clientIp) {
   let doorOpened = false;
   const settings = await dbHelper.getSettings();
   
+  // Notificar confirmación RemoteCheck al hardware Hikvision para que la pantalla del lector muestre "Verificado"
+  if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
+    deviceHelper.sendRemoteCheck(
+      settings.device_ip,
+      settings.device_port,
+      settings.device_user,
+      settings.device_password,
+      serialNo,
+      authorized
+    ).catch(e => console.warn('[Device API] Error enviando confirmación RemoteCheck:', e.message));
+  }
+  
   if (authorized && settings.enable_device_api_open === 'true') {
     logEvent('info', `Iniciando apertura remota de puerta en el dispositivo...`);
     const openResult = await deviceHelper.openDoor(
@@ -318,14 +330,23 @@ const handleDevicePOST = async (req, res) => {
 
     // Retorna la respuesta en el formato solicitado (JSON o XML)
     const isJsonRequested = req.url.includes('format=json') || 
-                            (req.headers['content-type'] && req.headers['content-type'].includes('application/json'));
+                            (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
+                            (req.rawBody && req.rawBody.includes('application/json')) ||
+                            (req.rawBody && req.rawBody.trim().startsWith('{'));
 
     if (isJsonRequested) {
       res.setHeader('Content-Type', 'application/json');
       return res.status(200).json({
         RemoteCheck: {
           serialNo: parseInt(result.serialNo) || 1,
-          checkResult: result.authorized ? "success" : "failed"
+          checkResult: result.authorized ? "success" : "failed",
+          name: result.name || undefined
+        },
+        ResponseStatus: {
+          requestURL: req.url || '/',
+          statusCode: 1,
+          statusString: "OK",
+          subStatusCode: "ok"
         }
       });
     } else {
@@ -335,6 +356,7 @@ const handleDevicePOST = async (req, res) => {
 <RemoteCheck version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
     <serialNo>${result.serialNo || 1}</serialNo>
     <checkResult>${result.authorized ? "success" : "failed"}</checkResult>
+    <name>${result.name || ''}</name>
 </RemoteCheck>`;
       return res.status(200).send(xmlResponse);
     }
