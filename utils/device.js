@@ -228,7 +228,7 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
   };
 
   try {
-    const result = await sendISAPIGenericRequest(
+    let result = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
@@ -239,11 +239,27 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
       payload
     );
 
+    let dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+    let isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+
+    // Fallback: Si SetUp falla o no está soportado, intentar con Record (POST)
+    if (!isSuccess) {
+      console.log(`[Device API] Reintentando registro de usuario con UserInfo/Record (POST)...`);
+      result = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'POST',
+        `/ISAPI/AccessControl/UserInfo/Record?format=json`,
+        { 'Content-Type': 'application/json' },
+        payload
+      );
+      dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+      isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    }
+
     console.log(`[Device API] User sync response: ${JSON.stringify(result.data)}`);
-    
-    // Check for success code or message
-    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
 
     return {
       success: isSuccess,
@@ -272,7 +288,7 @@ async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo
   };
 
   try {
-    const result = await sendISAPIGenericRequest(
+    let result = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
@@ -282,9 +298,28 @@ async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo
       { 'Content-Type': 'application/json' },
       payload
     );
+
+    let dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+    let isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+
+    // Fallback: Si SetUp falla, intentar con Record (POST)
+    if (!isSuccess) {
+      console.log(`[Device API] Reintentando registro de tarjeta con CardInfo/Record (POST)...`);
+      result = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'POST',
+        `/ISAPI/AccessControl/CardInfo/Record?format=json`,
+        { 'Content-Type': 'application/json' },
+        payload
+      );
+      dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
+      isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    }
+
     console.log(`[Device API] Card sync response: ${JSON.stringify(result.data)}`);
-    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
     return { success: isSuccess, status: result.status, data: result.data };
   } catch (error) {
     console.warn(`[Device API] Failed to sync card: ${error.message}`);
