@@ -193,6 +193,8 @@ function extractISAPIDiagnostic(data, fallbackError = null) {
 
   // Specific common Hikvision MinMoe diagnostic translations
   const translations = {
+    'employeeNoNotExist': 'El ID de empleado no existe en la base de datos del MinMoe (el usuario debe crearse primero con Record POST)',
+    'deviceUserAlreadyExist': 'El usuario ya existe en el biométrico (se actualizará)',
     'badParameters': 'Parámetros incompatibles o formato de datos no soportado por este firmware',
     'employeeNoInvalid': 'ID de empleado inválido (la serie MinMoe suele requerir IDs estrictamente numéricos)',
     'noFaceDetected': 'No se detectó ningún rostro humano en la imagen',
@@ -268,12 +270,13 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
 
 /**
  * Adds or updates a user record on the Hikvision device.
- * Attempts SetUp (PUT) with full payload, then simplified payload, and then Record (POST).
+ * Hikvision requires POST /ISAPI/AccessControl/UserInfo/Record to CREATE a new user.
+ * If the user already exists, it uses PUT /ISAPI/AccessControl/UserInfo/SetUp to UPDATE.
  */
 async function syncUserInfo(deviceIp, devicePort, username, password, userId, name) {
   const cleanUserId = String(userId).trim();
 
-  // Payload 1: Complete standard MinMoe payload
+  // Payload 1: Complete standard MinMoe payload for creating/updating user
   const fullPayload = {
     UserInfo: {
       employeeNo: cleanUserId,
@@ -282,8 +285,8 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
       closeDelayEnabled: false,
       Valid: {
         enable: true,
-        beginTime: "2026-01-01T00:00:00",
-        endTime: "2046-01-01T23:59:59",
+        beginTime: "2024-01-01T00:00:00",
+        endTime: "2036-12-31T23:59:59",
         timeType: "local"
       },
       belongGroup: "1",
@@ -313,10 +316,11 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
       userType: "normal",
       Valid: {
         enable: true,
-        beginTime: "2026-01-01T00:00:00",
-        endTime: "2046-01-01T23:59:59",
+        beginTime: "2024-01-01T00:00:00",
+        endTime: "2036-12-31T23:59:59",
         timeType: "local"
       },
+      belongGroup: "1",
       doorRight: "1"
     }
   };
@@ -324,23 +328,28 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
   let lastResult = null;
 
   try {
-    // Intento 1: UserInfo/SetUp (PUT) con payload completo
+    // PASO 1 (CREACIÓN): UserInfo/Record (POST) con fullPayload
+    // ¡CRUCIAL! Este es el endpoint oficial de Hikvision para DAR DE ALTA un usuario nuevo.
+    // Usar SetUp (PUT) en un usuario inexistente devuelve siempre "employeeNoNotExist".
+    console.log(`[Device API] Registrando nuevo usuario "${name}" (ID: ${cleanUserId}) con UserInfo/Record (POST)...`);
     lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
-      'PUT',
-      `/ISAPI/AccessControl/UserInfo/SetUp?format=json`,
+      'POST',
+      `/ISAPI/AccessControl/UserInfo/Record?format=json`,
       { 'Content-Type': 'application/json' },
       fullPayload
     );
 
     let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    const dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
+    const alreadyExists = /deviceUserAlreadyExist|userAlreadyExist|alreadyExist/i.test(dataStr);
 
-    // Intento 2: Si falló, intentar SetUp (PUT) con payload simplificado
-    if (!isSuccess) {
-      console.log(`[Device API] Reintentando registro de usuario con payload simplificado (PUT)...`);
+    // PASO 2: Si el usuario ya existe en el MinMoe, actualizamos su información con SetUp (PUT)
+    if (alreadyExists) {
+      console.log(`[Device API] Usuario "${cleanUserId}" ya existe en el MinMoe. Actualizando con UserInfo/SetUp (PUT)...`);
       lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
@@ -349,14 +358,29 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
         'PUT',
         `/ISAPI/AccessControl/UserInfo/SetUp?format=json`,
         { 'Content-Type': 'application/json' },
-        simplifiedPayload
+        fullPayload
       );
       isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+
+      if (!isSuccess) {
+        console.log(`[Device API] Reintentando actualización con UserInfo/Modify (PUT)...`);
+        lastResult = await sendISAPIGenericRequest(
+          deviceIp,
+          devicePort,
+          username,
+          password,
+          'PUT',
+          `/ISAPI/AccessControl/UserInfo/Modify?format=json`,
+          { 'Content-Type': 'application/json' },
+          fullPayload
+        );
+        isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+      }
     }
 
-    // Intento 3: Si falló, intentar UserInfo/Record (POST)
-    if (!isSuccess) {
-      console.log(`[Device API] Reintentando registro de usuario con UserInfo/Record (POST)...`);
+    // PASO 3: Si Record (POST) falló con badParameters (plantillas de horario), reintentar con simplifiedPayload
+    if (!isSuccess && !alreadyExists) {
+      console.log(`[Device API] Reintentando alta de usuario con payload simplificado (POST Record)...`);
       lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
@@ -364,6 +388,22 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
         password,
         'POST',
         `/ISAPI/AccessControl/UserInfo/Record?format=json`,
+        { 'Content-Type': 'application/json' },
+        simplifiedPayload
+      );
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    }
+
+    // PASO 4: Fallback para dispositivos que solo soporten SetUp (PUT)
+    if (!isSuccess && !alreadyExists) {
+      console.log(`[Device API] Intentando fallback con UserInfo/SetUp (PUT)...`);
+      lastResult = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'PUT',
+        `/ISAPI/AccessControl/UserInfo/SetUp?format=json`,
         { 'Content-Type': 'application/json' },
         simplifiedPayload
       );
@@ -391,6 +431,7 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
 
 /**
  * Adds or updates a card record on the Hikvision device linked to the employeeNo.
+ * Attempts CardInfo/Record (POST) first, and falls back to CardInfo/SetUp (PUT).
  */
 async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo, cardNo) {
   const cleanEmployeeNo = String(employeeNo).trim();
@@ -407,30 +448,33 @@ async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo
   let lastResult = null;
 
   try {
-    // Intento 1: CardInfo/SetUp (PUT)
+    // Intento 1 (ALTA): CardInfo/Record (POST) para vincular la tarjeta al usuario
+    console.log(`[Device API] Vinculando tarjeta ${cleanCardNo} al usuario ${cleanEmployeeNo} con CardInfo/Record (POST)...`);
     lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
-      'PUT',
-      `/ISAPI/AccessControl/CardInfo/SetUp?format=json`,
+      'POST',
+      `/ISAPI/AccessControl/CardInfo/Record?format=json`,
       { 'Content-Type': 'application/json' },
       payload
     );
 
     let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    const dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
+    const alreadyExists = /cardAlreadyExist|alreadyExist|cardNoAlreadyExist/i.test(dataStr);
 
-    // Intento 2: Si falló, intentar CardInfo/Record (POST)
-    if (!isSuccess) {
-      console.log(`[Device API] Reintentando registro de tarjeta con CardInfo/Record (POST)...`);
+    // Intento 2: Si la tarjeta ya existe o si SetUp (PUT) es requerido
+    if (!isSuccess || alreadyExists) {
+      console.log(`[Device API] Aplicando tarjeta con CardInfo/SetUp (PUT)...`);
       lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
         username,
         password,
-        'POST',
-        `/ISAPI/AccessControl/CardInfo/Record?format=json`,
+        'PUT',
+        `/ISAPI/AccessControl/CardInfo/SetUp?format=json`,
         { 'Content-Type': 'application/json' },
         payload
       );
@@ -585,10 +629,24 @@ async function syncFullUserToDevice(settings, user, imageBuffer = null) {
   let cardSuccess = false;
   let faceSuccess = null;
 
-  // 1. Sincronizar información básica de usuario
+  // 1. Sincronizar información básica de usuario (CREAR primero con Record POST)
   const userRes = await syncUserInfo(ip, port, userAuth, pass, user.user_id, user.name);
   diagnostics.push(`Usuario (${user.name}): ${userRes.diagnostic}`);
   userSuccess = userRes.success;
+
+  // ¡CRUCIAL! Si el usuario no existe en la base de datos del MinMoe, no tiene sentido intentar vincular tarjeta o rostro
+  // porque el hardware responderá inevitablemente con employeeNoNotExist!
+  if (!userSuccess) {
+    diagnostics.push(`Tarjeta y Rostro omitidos: Se requiere que el usuario exista en el MinMoe primero.`);
+    return {
+      synced: false,
+      userSuccess: false,
+      cardSuccess: false,
+      faceSuccess: false,
+      diagnostics,
+      summary: `Fallo al registrar usuario en MinMoe: ${userRes.diagnostic}`
+    };
+  }
 
   // 2. Sincronizar tarjeta (asociada al user_id)
   const cardRes = await syncCardInfo(ip, port, userAuth, pass, user.user_id, user.user_id);
