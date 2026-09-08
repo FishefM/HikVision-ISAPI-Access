@@ -76,10 +76,36 @@ async function addUser(req, res) {
     }
   }
 
+// Helper para leer dimensiones de un buffer JPEG (SOF0/SOF1/SOF2)
+function getJpegDimensions(buffer) {
+  if (!buffer || buffer.length < 4 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) return null;
+  let offset = 2;
+  while (offset < buffer.length - 8) {
+    if (buffer[offset] !== 0xFF) { offset++; continue; }
+    const marker = buffer[offset + 1];
+    if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+      return {
+        height: buffer.readUInt16BE(offset + 5),
+        width: buffer.readUInt16BE(offset + 7)
+      };
+    }
+    const len = buffer.readUInt16BE(offset + 2);
+    offset += 2 + len;
+  }
+  return null;
+}
+
   // Guardar copia local de la fotografía si se adjuntó
   let imageBuffer = (req.file && req.file.buffer) ? req.file.buffer : null;
   if (imageBuffer) {
-    logEvent('info', `[MinMoe Foto] Fotografía recibida para "${name}": ${req.file.originalname} (${Math.round(imageBuffer.length / 1024)} KB, tipo: ${req.file.mimetype}).`);
+    const dims = getJpegDimensions(imageBuffer);
+    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
+    logEvent('info', `[MinMoe Foto] Fotografía recibida para "${name}": ${req.file.originalname} (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
+    if (dims && dims.width !== dims.height) {
+      logEvent('warning', `[MinMoe Foto ADVERTENCIA] La foto no es cuadrada (${dimText}). Se recomienda formato 1:1 (600x600 px) para correcta visualización en MinMoe.`);
+    } else if (dims) {
+      logEvent('info', `[MinMoe Foto OK] Formato cuadrado 1:1 verificado (${dimText}).`);
+    }
     try {
       const localFacePath = path.join(facesDir, `${user_id}.jpg`);
       fs.writeFileSync(localFacePath, imageBuffer);
@@ -173,7 +199,14 @@ async function updateUser(req, res) {
   let imageBuffer = (req.file && req.file.buffer) ? req.file.buffer : null;
   const localFacePath = path.join(facesDir, `${user_id}.jpg`);
   if (imageBuffer) {
-    logEvent('info', `[MinMoe Foto] Nueva fotografía recibida para "${name}" (${Math.round(imageBuffer.length / 1024)} KB).`);
+    const dims = getJpegDimensions(imageBuffer);
+    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
+    logEvent('info', `[MinMoe Foto] Nueva fotografía recibida para "${name}" (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
+    if (dims && dims.width !== dims.height) {
+      logEvent('warning', `[MinMoe Foto ADVERTENCIA] La foto no es cuadrada (${dimText}). Se recomienda formato 1:1 (600x600 px) para correcta visualización en MinMoe.`);
+    } else if (dims) {
+      logEvent('info', `[MinMoe Foto OK] Formato cuadrado 1:1 verificado (${dimText}).`);
+    }
     try {
       fs.writeFileSync(localFacePath, imageBuffer);
       logEvent('info', `[Almacenamiento Local] Fotografía actualizada en disco (${user_id}.jpg).`);
@@ -183,7 +216,9 @@ async function updateUser(req, res) {
   } else if (fs.existsSync(localFacePath)) {
     try {
       imageBuffer = fs.readFileSync(localFacePath);
-      logEvent('info', `[MinMoe Foto] Utilizando fotografía existente en disco para "${name}" (${Math.round(imageBuffer.length / 1024)} KB).`);
+      const dims = getJpegDimensions(imageBuffer);
+      const dimText = dims ? `, ${dims.width}x${dims.height} px` : '';
+      logEvent('info', `[MinMoe Foto] Utilizando fotografía existente en disco para "${name}" (${Math.round(imageBuffer.length / 1024)} KB${dimText}).`);
     } catch (_) {}
   }
 
@@ -435,11 +470,105 @@ async function syncSingleUser(req, res) {
   }
 }
 
+/**
+ * Obtiene la fotografía guardada de un alumno en disco si existe
+ */
+async function getUserPhoto(req, res) {
+  const id = req.params.id;
+  try {
+    const users = await dbHelper.getUsers();
+    const user = users.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+    if (!user) {
+      return res.status(404).json({ error: 'Alumno no encontrado.' });
+    }
+    const localFacePath = path.join(facesDir, `${user.user_id}.jpg`);
+    if (fs.existsSync(localFacePath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      return res.sendFile(localFacePath);
+    }
+    return res.status(404).json({ error: 'No hay fotografía registrada para este alumno.' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+/**
+ * Dispara la captura facial remota en la cámara física del MinMoe
+ */
+async function captureFace(req, res) {
+  try {
+    const settings = await dbHelper.getSettings();
+    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
+      return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
+    }
+
+    logEvent('info', '[MinMoe Captura] Iniciando captura facial remota... Mire a la cámara del biométrico.');
+    const imageBuffer = await deviceHelper.captureFaceFromDevice(settings);
+
+    const dims = getJpegDimensions(imageBuffer);
+    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
+    logEvent('success', `[MinMoe Captura OK] Rostro capturado exitosamente por el biométrico (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
+
+    const base64Data = imageBuffer.toString('base64');
+    res.json({
+      success: true,
+      imageBufferBase64: `data:image/jpeg;base64,${base64Data}`,
+      sizeKB: Math.round(imageBuffer.length / 1024),
+      dimensions: dims
+    });
+  } catch (err) {
+    logEvent('error', `[MinMoe Captura ERROR] Falló la captura remota: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+/**
+ * Consulta y descarga la foto ya registrada físicamente en el MinMoe para sincronizarla en local
+ */
+async function importFaceFromDevice(req, res) {
+  const id = req.params.id;
+  try {
+    const users = await dbHelper.getUsers();
+    const user = users.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+    if (!user) {
+      return res.status(404).json({ error: 'Alumno no encontrado.' });
+    }
+
+    const settings = await dbHelper.getSettings();
+    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
+      return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
+    }
+
+    logEvent('info', `[MinMoe] Importando fotografía desde el biométrico para ${user.name} (${user.user_id})...`);
+    const imageBuffer = await deviceHelper.fetchFaceFromDevice(settings, user.user_id);
+
+    const localFacePath = path.join(facesDir, `${user.user_id}.jpg`);
+    fs.writeFileSync(localFacePath, imageBuffer);
+
+    const dims = getJpegDimensions(imageBuffer);
+    const dimText = dims ? `${dims.width}x${dims.height} px` : '';
+    logEvent('success', `[MinMoe OK] Fotografía importada y guardada localmente (${Math.round(imageBuffer.length / 1024)} KB${dimText ? ', ' + dimText : ''}).`);
+
+    res.json({
+      success: true,
+      user_id: user.user_id,
+      sizeKB: Math.round(imageBuffer.length / 1024),
+      dimensions: dims
+    });
+  } catch (err) {
+    logEvent('error', `[MinMoe ERROR] Error al importar fotografía: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   getUsers,
   addUser,
   updateUser,
   deleteUser,
   syncAllUsers,
-  syncSingleUser
+  syncSingleUser,
+  getUserPhoto,
+  captureFace,
+  importFaceFromDevice
 };

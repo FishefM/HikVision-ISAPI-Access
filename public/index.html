@@ -233,11 +233,21 @@
                   <small class="helper-text">Si se deja en blanco, se asignará la validación local automática.</small>
                 </div>
                 <div class="form-group">
-                  <label for="user-face-image">Foto de Rostro (Opcional - Auto-comprimida a &lt; 200KB)</label>
+                  <label for="user-face-image">Foto de Rostro (Recorte cuadrado 1:1 automático)</label>
                   <input type="file" id="user-face-image" class="form-input" accept="image/jpeg,image/png,image/jpg" style="padding: 0.5rem 0.75rem; line-height: 1;">
-                  <small class="helper-text">Cualquier foto se optimiza en formato JPEG sRGB antes de enviar al biométrico.</small>
+                  <small class="helper-text">El sistema recortará y ajustará automáticamente la imagen a formato cuadrado 1:1 (600x600 px) para el MinMoe.</small>
+                  
+                  <div class="btn-group" style="margin-top: 0.5rem; gap: 0.5rem; flex-wrap: wrap;">
+                    <button type="button" id="btn-device-capture-face" class="btn btn-secondary btn-sm" title="Disparar captura remota en la cámara del MinMoe">
+                      <i data-lucide="camera"></i> Tomar Foto con Cámara del MinMoe
+                    </button>
+                    <button type="button" id="btn-device-import-face" class="btn btn-secondary btn-sm hidden" title="Descargar foto guardada físicamente en el lector">
+                      <i data-lucide="download"></i> Importar Foto desde MinMoe
+                    </button>
+                  </div>
+
                   <div id="face-preview-container" class="hidden" style="margin-top: 0.75rem; text-align: center; background: rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 6px;">
-                    <img id="face-preview-img" src="" alt="Vista previa de rostro" style="max-height: 140px; border-radius: 4px; border: 1px solid #ccc; display: inline-block;">
+                    <img id="face-preview-img" src="" alt="Vista previa de rostro" style="width: 140px; height: 140px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; display: inline-block;">
                     <div id="face-preview-info" style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;"></div>
                   </div>
                 </div>

@@ -16,11 +16,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // User DB routes
 router.get('/users', userController.getUsers);
+router.get('/users/:id/photo', userController.getUserPhoto);
 router.post('/users', upload.single('faceImage'), userController.addUser);
 router.put('/users/:id', upload.single('faceImage'), userController.updateUser);
 router.delete('/users/:id', userController.deleteUser);
 router.post('/users/sync-all', userController.syncAllUsers);
 router.post('/users/:id/sync-device', userController.syncSingleUser);
+router.post('/device/capture-face', userController.captureFace);
+router.post('/users/:id/import-face', userController.importFaceFromDevice);
 
 // Settings routes
 router.get('/settings', settingsController.getSettings);

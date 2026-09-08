@@ -234,7 +234,7 @@ function extractISAPIDiagnostic(data, fallbackError = null) {
 /**
  * Sends a generic command to the Hikvision device using manual Digest Authentication and custom headers/body.
  */
-async function sendISAPIGenericRequest(deviceIp, devicePort, username, password, method, path, headers = {}, data = null) {
+async function sendISAPIGenericRequest(deviceIp, devicePort, username, password, method, path, headers = {}, data = null, extraConfig = {}) {
   const url = `http://${deviceIp}:${devicePort}${path}`;
   const mergedHeaders = {
     'Accept': 'application/json, application/xml, text/xml, */*',
@@ -254,9 +254,10 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
     headers: mergedHeaders,
     data: data,
     validateStatus: (status) => status >= 200 && status < 500, // Permit 401 response for digest challenge
-    timeout: 15000, // 15 second timeout for image transfers
+    timeout: extraConfig.timeout || 15000, // 15 second timeout for image transfers
     maxBodyLength: Infinity,
-    maxContentLength: Infinity
+    maxContentLength: Infinity,
+    ...(extraConfig.responseType ? { responseType: extraConfig.responseType } : {})
   };
 
   try {
@@ -529,7 +530,7 @@ async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo
  * 3. Dual synchronization: AccessControl/FaceInfo/SetUp (user profile in web UI) and FDLib/FaceDataRecord (AI matching engine).
  * 4. Automatic handling of existing faces (PUT updates or DELETE+POST if already registered).
  */
-async function syncUserFace(deviceIp, devicePort, username, password, userId, imageBuffer) {
+async function syncUserFace(deviceIp, devicePort, username, password, userId, imageBuffer, userName = '') {
   const cleanUserId = String(userId).trim();
 
   if (!imageBuffer || imageBuffer.length === 0) {
@@ -542,6 +543,32 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
   // Validar cabecera JPEG (SOI marker 0xFF 0xD8)
   if (imageBuffer.length < 3 || imageBuffer[0] !== 0xFF || imageBuffer[1] !== 0xD8) {
     console.warn(`[Device API Face] Advertencia: El buffer no comienza con bytes JPEG (0xFF, 0xD8). Bytes: ${imageBuffer.slice(0, 4).toString('hex')}`);
+  }
+
+  // Extraer y validar dimensiones JPEG para asegurar formato cuadrado 1:1
+  let dims = null;
+  try {
+    let offset = 2;
+    while (offset < imageBuffer.length - 8) {
+      if (imageBuffer[offset] !== 0xFF) { offset++; continue; }
+      const marker = imageBuffer[offset + 1];
+      if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+        dims = {
+          height: imageBuffer.readUInt16BE(offset + 5),
+          width: imageBuffer.readUInt16BE(offset + 7)
+        };
+        break;
+      }
+      const len = imageBuffer.readUInt16BE(offset + 2);
+      offset += 2 + len;
+    }
+  } catch (_) {}
+
+  if (dims) {
+    console.log(`[Device API Face] Dimensiones de imagen: ${dims.width}x${dims.height} px (Ratio: ${(dims.width / dims.height).toFixed(2)})`);
+    if (dims.width !== dims.height) {
+      console.warn(`[Device API Face ADVERTENCIA] La imagen no es cuadrada (${dims.width}x${dims.height}). MinMoe requiere 1:1 (ej. 600x600 px) para mostrarla en la interfaz web.`);
+    }
   }
 
   // Helper to build standard RFC 7578 multipart/form-data with exact Content-Length for Hikvision ISAPI
@@ -576,8 +603,12 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
   const payloadFD = {
     faceLibType: "blackFD",
     FDID: "1",
-    FPID: cleanUserId
+    FPID: cleanUserId,
+    employeeNo: cleanUserId
   };
+  if (userName) {
+    payloadFD.name = String(userName).trim();
+  }
 
   const bodyFD = buildMultipart(boundary, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
 
@@ -781,7 +812,7 @@ async function syncFullUserToDevice(settings, user, imageBuffer = null) {
 
   // 3. Sincronizar rostro si se proporcionó buffer de imagen
   if (imageBuffer && imageBuffer.length > 0) {
-    const faceRes = await syncUserFace(ip, port, userAuth, pass, user.user_id, imageBuffer);
+    const faceRes = await syncUserFace(ip, port, userAuth, pass, user.user_id, imageBuffer, user.name);
     diagnostics.push(`Rostro: ${faceRes.diagnostic}`);
     faceSuccess = faceRes.success;
   }
@@ -993,6 +1024,158 @@ async function sendRemoteCheck(deviceIp, devicePort, username, password, serialN
   }
 }
 
+/**
+ * Triggers remote face capture on the physical MinMoe device camera.
+ * Prompts the user to stand in front of the terminal to capture face data.
+ */
+async function captureFaceFromDevice(settings, timeoutSeconds = 20) {
+  const ip = settings.device_ip;
+  const port = settings.device_port || 80;
+  const user = settings.device_user || 'admin';
+  const pass = settings.device_password || '';
+
+  if (!ip || !user || !pass) {
+    throw new Error('Parámetros de conexión del lector biométrico incompletos.');
+  }
+
+  console.log(`[Device API Capture] Iniciando captura facial remota en MinMoe (${ip})...`);
+
+  // Intentar primero con JSON, luego con XML como fallback
+  const jsonCond = {
+    CaptureFaceDataCond: {
+      captureInfrared: false,
+      dataType: "url"
+    }
+  };
+
+  let initRes = null;
+  try {
+    initRes = await sendISAPIGenericRequest(
+      ip, port, user, pass,
+      'POST',
+      `/ISAPI/AccessControl/CaptureFaceData?format=json`,
+      { 'Content-Type': 'application/json' },
+      JSON.stringify(jsonCond)
+    );
+  } catch (err) {
+    console.log(`[Device API Capture] JSON no aceptado, intentando con XML...`);
+    const xmlCond = `<CaptureFaceDataCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureInfrared>false</captureInfrared><dataType>url</dataType></CaptureFaceDataCond>`;
+    initRes = await sendISAPIGenericRequest(
+      ip, port, user, pass,
+      'POST',
+      `/ISAPI/AccessControl/CaptureFaceData`,
+      { 'Content-Type': 'application/xml' },
+      xmlCond
+    );
+  }
+
+  const startTime = Date.now();
+  const maxTimeMs = timeoutSeconds * 1000;
+  let capturedUrl = null;
+
+  if (initRes && initRes.data) {
+    const dataStr = typeof initRes.data === 'string' ? initRes.data : JSON.stringify(initRes.data);
+    const urlMatch = dataStr.match(/faceDataUrl[">:\s]+["']?([^<"'\r\n}]+)/i);
+    if (urlMatch) capturedUrl = urlMatch[1].trim();
+  }
+
+  // Sondeo del estado de captura mientras el alumno se posiciona frente a la cámara
+  while (!capturedUrl && (Date.now() - startTime) < maxTimeMs) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      const progRes = await sendISAPIGenericRequest(
+        ip, port, user, pass,
+        'GET',
+        `/ISAPI/AccessControl/CaptureFaceData/Progress?format=json`
+      );
+      const dataStr = typeof progRes.data === 'string' ? progRes.data : JSON.stringify(progRes.data || {});
+      const progMatch = dataStr.match(/captureProgress[">:\s]+["']?(\d+)/i);
+      const progress = progMatch ? parseInt(progMatch[1], 10) : 0;
+
+      const urlMatch = dataStr.match(/faceDataUrl[">:\s]+["']?([^<"'\r\n}]+)/i);
+      if (urlMatch) {
+        capturedUrl = urlMatch[1].trim();
+        break;
+      }
+      if (progress === 100) {
+        capturedUrl = `/ISAPI/AccessControl/CaptureFaceData/FaceData`;
+        break;
+      }
+    } catch (_) {}
+  }
+
+  if (!capturedUrl) {
+    throw new Error('Tiempo de espera agotado. No se detectó ningún rostro frente a la cámara del biométrico.');
+  }
+
+  console.log(`[Device API Capture] Descargando imagen capturada desde ${capturedUrl}...`);
+  const reqPath = capturedUrl.startsWith('http') ? capturedUrl.replace(/^http:\/\/[^/]+/, '') : capturedUrl;
+  const imgRes = await sendISAPIGenericRequest(
+    ip, port, user, pass,
+    'GET',
+    reqPath,
+    {},
+    null,
+    { responseType: 'arraybuffer' }
+  );
+
+  return Buffer.isBuffer(imgRes.data) ? imgRes.data : Buffer.from(imgRes.data);
+}
+
+/**
+ * Queries the MinMoe face library to retrieve and download a user's face photo already registered on the terminal.
+ */
+async function fetchFaceFromDevice(settings, userId) {
+  const ip = settings.device_ip;
+  const port = settings.device_port || 80;
+  const user = settings.device_user || 'admin';
+  const pass = settings.device_password || '';
+  const cleanUserId = String(userId).trim();
+
+  if (!ip || !user || !pass || !cleanUserId) {
+    throw new Error('Parámetros de conexión o ID de usuario incompletos.');
+  }
+
+  console.log(`[Device API Face] Consultando fotografía en MinMoe para ID: ${cleanUserId}...`);
+  const searchPayload = {
+    searchResultPosition: 0,
+    maxResults: 1,
+    faceLibType: "blackFD",
+    FDID: "1",
+    FPID: cleanUserId
+  };
+
+  const res = await sendISAPIGenericRequest(
+    ip, port, user, pass,
+    'POST',
+    `/ISAPI/Intelligent/FDLib/FDSearch?format=json`,
+    { 'Content-Type': 'application/json' },
+    searchPayload
+  );
+
+  const dataStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data || {});
+  const picUrlMatch = dataStr.match(/picURL[">:\s]+["']?([^<"'\r\n}]+)/i) || dataStr.match(/faceURL[">:\s]+["']?([^<"'\r\n}]+)/i);
+
+  if (!picUrlMatch || !picUrlMatch[1]) {
+    throw new Error(`El usuario "${cleanUserId}" no tiene fotografía registrada en el MinMoe.`);
+  }
+
+  const picPath = picUrlMatch[1].trim();
+  const reqPath = picPath.startsWith('http') ? picPath.replace(/^http:\/\/[^/]+/, '') : picPath;
+
+  console.log(`[Device API Face] Descargando fotografía de ${cleanUserId} desde ${reqPath}...`);
+  const imgRes = await sendISAPIGenericRequest(
+    ip, port, user, pass,
+    'GET',
+    reqPath,
+    {},
+    null,
+    { responseType: 'arraybuffer' }
+  );
+
+  return Buffer.isBuffer(imgRes.data) ? imgRes.data : Buffer.from(imgRes.data);
+}
+
 module.exports = {
   sendISAPICommand,
   openDoor,
@@ -1004,5 +1187,7 @@ module.exports = {
   deleteUserFromDevice,
   sendRemoteCheck,
   isISAPISuccess,
-  extractISAPIDiagnostic
+  extractISAPIDiagnostic,
+  captureFaceFromDevice,
+  fetchFaceFromDevice
 };

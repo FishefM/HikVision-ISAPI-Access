@@ -368,8 +368,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Form Actions & Modals
   // ==========================================================================
+  let capturedFaceBlob = null;
+
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
+    const previewContainer = document.getElementById('face-preview-container');
+    const previewImg = document.getElementById('face-preview-img');
+    const previewInfo = document.getElementById('face-preview-info');
+    const btnDeviceImportFace = document.getElementById('btn-device-import-face');
+    capturedFaceBlob = null;
     
     if (user) {
       userFormTitle.textContent = 'Editar Usuario';
@@ -377,10 +384,27 @@ document.addEventListener('DOMContentLoaded', () => {
       userIdInput.value = user.user_id;
       userNameInput.value = user.name;
       userApiUrlInput.value = user.api_url;
+      if (btnDeviceImportFace) btnDeviceImportFace.classList.remove('hidden');
+
+      // Cargar vista previa de fotografía existente en el sistema si la tiene
+      if (previewContainer && previewImg && previewInfo) {
+        previewImg.src = `${API_USERS}/${user.id}/photo?t=${Date.now()}`;
+        previewImg.onload = () => {
+          previewInfo.textContent = 'Fotografía guardada en el sistema (MinMoe / Local)';
+          previewContainer.classList.remove('hidden');
+        };
+        previewImg.onerror = () => {
+          previewContainer.classList.add('hidden');
+          previewImg.src = '';
+        };
+      }
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Usuario';
       userForm.reset();
       userDbIdInput.value = '';
+      if (btnDeviceImportFace) btnDeviceImportFace.classList.add('hidden');
+      if (previewContainer) previewContainer.classList.add('hidden');
+      if (previewImg) previewImg.src = '';
     }
   }
 
@@ -388,40 +412,51 @@ document.addEventListener('DOMContentLoaded', () => {
     userFormContainer.classList.add('hidden');
     userForm.reset();
     userDbIdInput.value = '';
+    capturedFaceBlob = null;
+    const btnDeviceImportFace = document.getElementById('btn-device-import-face');
+    if (btnDeviceImportFace) btnDeviceImportFace.classList.add('hidden');
     const previewContainer = document.getElementById('face-preview-container');
     const previewImg = document.getElementById('face-preview-img');
     if (previewContainer) previewContainer.classList.add('hidden');
     if (previewImg) previewImg.src = '';
   }
 
-  // Helper to auto-resize and compress images client-side to JPEG < 180KB for Hikvision MinMoe
-  async function optimizeFaceImage(file, maxSizeKB = 180, maxDim = 800) {
+  // Helper para recortar a cuadrado 1:1, redimensionar a 600x600 px y comprimir a JPEG < 180KB para Hikvision MinMoe
+  async function optimizeFaceImage(file, maxSizeKB = 180, targetDim = 600) {
     if (!file) return null;
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
-          let width = img.width;
-          let height = img.height;
-          if (width > maxDim || height > maxDim) {
-            if (width >= height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
+          // Hikvision MinMoe requiere estrictamente una imagen cuadrada (relacion de aspecto 1:1).
+          // Recortamos proporcionalmente centrado (square crop) para evitar cualquier distorsion en el rostro.
+          const sDim = Math.min(img.width, img.height);
+          let sx = 0;
+          let sy = 0;
+
+          if (img.width > img.height) {
+            // Paisaje (horizontal): centrado horizontal
+            sx = Math.round((img.width - sDim) / 2);
+            sy = 0;
+          } else if (img.height > img.width) {
+            // Retrato (vertical): en fotos de carnet/identificacion el rostro suele ubicarse en la parte superior-media.
+            // Usamos un desplazamiento del 25% del excedente superior para encuadrar frente, ojos y hombros.
+            sy = Math.round((img.height - sDim) * 0.25);
+            sx = 0;
           }
+
           const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = targetDim;
+          canvas.height = targetDim;
           const ctx = canvas.getContext('2d');
 
           // Rellenar con fondo blanco solido para evitar transparencias o fondos oscuros
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0, width, height);
+          ctx.fillRect(0, 0, targetDim, targetDim);
+
+          // Dibujar el recorte cuadrado proporcionalmente en el lienzo cuadrado de targetDim x targetDim
+          ctx.drawImage(img, sx, sy, sDim, sDim, 0, 0, targetDim, targetDim);
 
           let quality = 0.85;
           function attemptCompress() {
@@ -462,12 +497,108 @@ document.addEventListener('DOMContentLoaded', () => {
           const opt = await optimizeFaceImage(faceInputEl.files[0]);
           if (previewImg && previewContainer && previewInfo) {
             previewImg.src = URL.createObjectURL(opt);
-            previewInfo.textContent = `Optimizado: ${Math.round(opt.size / 1024)} KB (JPEG sRGB)`;
+            previewInfo.textContent = `Cuadrada 1:1 (600x600 px) - ${Math.round(opt.size / 1024)} KB (JPEG sRGB)`;
             previewContainer.classList.remove('hidden');
           }
         } catch (_) {}
       } else if (previewContainer) {
         previewContainer.classList.add('hidden');
+      }
+    });
+  }
+
+  // Botón para capturar foto directamente con la cámara del MinMoe
+  const btnDeviceCaptureFace = document.getElementById('btn-device-capture-face');
+  if (btnDeviceCaptureFace) {
+    btnDeviceCaptureFace.addEventListener('click', async () => {
+      const originalText = btnDeviceCaptureFace.innerHTML;
+      btnDeviceCaptureFace.disabled = true;
+      btnDeviceCaptureFace.innerHTML = '<span>Mire a la cámara del MinMoe...</span>';
+      appendConsoleLog('info', '[MinMoe Captura] Disparando captura remota... Mire a la cámara del lector biométrico.');
+
+      try {
+        const res = await fetch('/api/device/capture-face', { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok && data.success && data.imageBufferBase64) {
+          appendConsoleLog('success', `[MinMoe Captura OK] Rostro capturado con éxito (${data.sizeKB} KB).`);
+          
+          const previewContainer = document.getElementById('face-preview-container');
+          const previewImg = document.getElementById('face-preview-img');
+          const previewInfo = document.getElementById('face-preview-info');
+
+          if (previewImg && previewContainer && previewInfo) {
+            previewImg.src = data.imageBufferBase64;
+            previewInfo.textContent = `Capturada con MinMoe: 600x600 px (${data.sizeKB} KB, JPEG)`;
+            previewContainer.classList.remove('hidden');
+          }
+
+          // Convertir base64 a File para adjuntar en el formulario al guardar
+          const byteCharacters = atob(data.imageBufferBase64.split(',')[1]);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          capturedFaceBlob = new File([byteArray], 'minmoe_capture.jpg', { type: 'image/jpeg' });
+          alert('Foto capturada exitosamente con el biométrico MinMoe.');
+        } else {
+          appendConsoleLog('error', `[MinMoe Captura Error] ${data.error || 'No se pudo capturar el rostro.'}`);
+          alert(`Error en captura remota:\n${data.error || 'El dispositivo no completó la captura.'}`);
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[MinMoe Captura Error] Excepción de conexión: ${err.message}`);
+        alert(`Error de comunicación con el biométrico:\n${err.message}`);
+      } finally {
+        btnDeviceCaptureFace.disabled = false;
+        btnDeviceCaptureFace.innerHTML = originalText;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    });
+  }
+
+  // Botón para importar foto ya registrada físicamente en el MinMoe
+  const btnDeviceImportFace = document.getElementById('btn-device-import-face');
+  if (btnDeviceImportFace) {
+    btnDeviceImportFace.addEventListener('click', async () => {
+      const dbId = userDbIdInput.value;
+      if (!dbId) {
+        alert('Debe seleccionar un alumno existente para importar su foto.');
+        return;
+      }
+
+      const originalText = btnDeviceImportFace.innerHTML;
+      btnDeviceImportFace.disabled = true;
+      btnDeviceImportFace.innerHTML = '<span>Importando...</span>';
+      appendConsoleLog('info', `[MinMoe] Consultando fotografía existente en el biométrico...`);
+
+      try {
+        const res = await fetch(`${API_USERS}/${dbId}/import-face`, { method: 'POST' });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          appendConsoleLog('success', `[MinMoe OK] Fotografía importada y guardada localmente (${data.sizeKB} KB).`);
+          const previewContainer = document.getElementById('face-preview-container');
+          const previewImg = document.getElementById('face-preview-img');
+          const previewInfo = document.getElementById('face-preview-info');
+
+          if (previewImg && previewContainer && previewInfo) {
+            previewImg.src = `${API_USERS}/${dbId}/photo?t=${Date.now()}`;
+            previewInfo.textContent = `Importada desde MinMoe (${data.sizeKB} KB)`;
+            previewContainer.classList.remove('hidden');
+          }
+          alert('Fotografía importada con éxito desde el MinMoe y guardada localmente.');
+        } else {
+          appendConsoleLog('error', `[MinMoe Error] ${data.error || 'No se encontró fotografía en el lector.'}`);
+          alert(`No se pudo importar la foto:\n${data.error || 'No hay fotografía registrada en el MinMoe.'}`);
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[MinMoe Error] Excepción: ${err.message}`);
+        alert(`Error de conexión:\n${err.message}`);
+      } finally {
+        btnDeviceImportFace.disabled = false;
+        btnDeviceImportFace.innerHTML = originalText;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
       }
     });
   }
@@ -520,15 +651,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (faceInput && faceInput.files && faceInput.files[0]) {
       const originalFile = faceInput.files[0];
       try {
-        appendConsoleLog('info', `Optimizando fotografía (${Math.round(originalFile.size / 1024)} KB) para el MinMoe...`);
+        appendConsoleLog('info', `Optimizando fotografía (${Math.round(originalFile.size / 1024)} KB) a formato cuadrado 1:1 (600x600 px)...`);
         const optimizedFile = await optimizeFaceImage(originalFile);
         formData.append('faceImage', optimizedFile);
-        appendConsoleLog('info', `Fotografía optimizada con éxito (${Math.round(optimizedFile.size / 1024)} KB, JPEG).`);
+        appendConsoleLog('info', `Fotografía optimizada con éxito (${Math.round(optimizedFile.size / 1024)} KB, 600x600 px, JPEG).`);
       } catch (optErr) {
         console.warn('Fallo optimización de imagen:', optErr);
         appendConsoleLog('warning', `No se pudo auto-comprimir foto: ${optErr.message}. Enviando original.`);
         formData.append('faceImage', originalFile);
       }
+    } else if (capturedFaceBlob) {
+      formData.append('faceImage', capturedFaceBlob);
+      appendConsoleLog('info', 'Adjuntando fotografía capturada con la cámara del MinMoe.');
     }
 
     const isEdit = dbId !== '';
