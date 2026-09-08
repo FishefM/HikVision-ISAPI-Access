@@ -179,6 +179,9 @@ document.addEventListener('DOMContentLoaded', () => {
         <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${escapeHTML(user.api_url)}</span></td>
         <td class="actions-col">
           <div class="action-btn-group">
+            <button class="btn btn-icon-only text-warning sync-user-btn" data-id="${user.id}" title="Sincronizar este alumno al MinMoe">
+              <i data-lucide="refresh-cw"></i>
+            </button>
             <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Código QR">
               <i data-lucide="qr-code"></i>
             </button>
@@ -198,6 +201,36 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) window.lucide.createIcons();
 
     // Attach Event Listeners to actions
+    document.querySelectorAll('.sync-user-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = parseInt(e.currentTarget.getAttribute('data-id'));
+        const user = usersList.find(u => u.id === id);
+        if (!user) return;
+        appendConsoleLog('info', `[MinMoe] Sincronizando alumno "${user.name}" (ID: ${user.user_id})...`);
+        btn.disabled = true;
+        try {
+          const res = await fetch(`${API_USERS}/${id}/sync-device`, { method: 'POST' });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            appendConsoleLog('success', `[MinMoe OK] "${user.name}" sincronizado exitosamente en el biométrico.`);
+            alert(`Sincronización Exitosa:\nAlumno "${user.name}" registrado en la memoria del MinMoe.`);
+          } else {
+            const warnMsg = data.summary || data.error || 'Respuesta inesperada del biométrico';
+            appendConsoleLog('warning', `[MinMoe Advertencia] ${user.name}: ${warnMsg}`);
+            if (data.diagnostics && data.diagnostics.length > 0) {
+              data.diagnostics.forEach(d => appendConsoleLog('info', `  └─ ${d}`));
+            }
+            alert(`Aviso del Biométrico para "${user.name}":\n${warnMsg}`);
+          }
+        } catch (err) {
+          appendConsoleLog('error', `[MinMoe Error] Fallo de red: ${err.message}`);
+          alert(`Error de red al sincronizar: ${err.message}`);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
     document.querySelectorAll('.qr-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
@@ -350,28 +383,109 @@ document.addEventListener('DOMContentLoaded', () => {
     userDbIdInput.value = '';
   }
 
+  // Helper to auto-resize and compress images client-side to JPEG < 180KB for Hikvision MinMoe
+  async function optimizeFaceImage(file, maxSizeKB = 180, maxWidth = 800) {
+    if (!file) return null;
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          let quality = 0.85;
+          function attemptCompress() {
+            canvas.toBlob((blob) => {
+              if (!blob) return reject(new Error('No se pudo procesar la imagen seleccionada.'));
+              if (blob.size <= maxSizeKB * 1024 || quality <= 0.3) {
+                const optimizedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(optimizedFile);
+              } else {
+                quality -= 0.15;
+                attemptCompress();
+              }
+            }, 'image/jpeg', quality);
+          }
+          attemptCompress();
+        };
+        img.onerror = () => reject(new Error('El archivo seleccionado no es una imagen válida.'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Error al leer el archivo de fotografía.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   btnShowAddUser.addEventListener('click', () => showUserForm());
   btnCancelUser.addEventListener('click', () => hideUserForm());
+
+  // Bulk Sync to Device listener
+  const btnSyncAllUsers = document.getElementById('btn-sync-all-users');
+  if (btnSyncAllUsers) {
+    btnSyncAllUsers.addEventListener('click', async () => {
+      if (!confirm('¿Desea sincronizar todos los alumnos de la base de datos con el biométrico Hikvision MinMoe?')) return;
+      appendConsoleLog('info', '[MinMoe] Iniciando sincronización masiva de alumnos...');
+      btnSyncAllUsers.disabled = true;
+      try {
+        const res = await fetch(`${API_USERS}/sync-all`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          appendConsoleLog('success', `[MinMoe OK] ${data.message}`);
+          alert(`Sincronización Masiva:\n${data.message}`);
+        } else {
+          appendConsoleLog('error', `[MinMoe Error] ${data.error || 'Fallo en la sincronización masiva.'}`);
+          alert(`Error al sincronizar:\n${data.error}`);
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[MinMoe Error] Fallo de conexión: ${err.message}`);
+        alert(`Error de conexión:\n${err.message}`);
+      } finally {
+        btnSyncAllUsers.disabled = false;
+      }
+    });
+  }
 
   userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const dbId = userDbIdInput.value;
     
+    let apiUrlValue = userApiUrlInput.value.trim();
+    if (!apiUrlValue) {
+      apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
+    }
+
     // Construct FormData to handle multipart text and files
     const formData = new FormData();
     formData.append('user_id', userIdInput.value.trim());
     formData.append('name', userNameInput.value.trim());
-    formData.append('api_url', userApiUrlInput.value.trim());
+    formData.append('api_url', apiUrlValue);
     
     const faceInput = document.getElementById('user-face-image');
     if (faceInput && faceInput.files && faceInput.files[0]) {
-      const file = faceInput.files[0];
-      // Hikvision device is very strict about size (< 200KB)
-      if (file.size > 200 * 1024) {
-        alert("La imagen de rostro debe ser inferior a 200 KB para que el lector biométrico pueda procesarla.");
-        return;
+      const originalFile = faceInput.files[0];
+      try {
+        appendConsoleLog('info', `Optimizando fotografía (${Math.round(originalFile.size / 1024)} KB) para el MinMoe...`);
+        const optimizedFile = await optimizeFaceImage(originalFile);
+        formData.append('faceImage', optimizedFile);
+        appendConsoleLog('info', `Fotografía optimizada con éxito (${Math.round(optimizedFile.size / 1024)} KB, JPEG).`);
+      } catch (optErr) {
+        console.warn('Fallo optimización de imagen:', optErr);
+        appendConsoleLog('warning', `No se pudo auto-comprimir foto: ${optErr.message}. Enviando original.`);
+        formData.append('faceImage', originalFile);
       }
-      formData.append('faceImage', file);
     }
 
     const isEdit = dbId !== '';
@@ -379,31 +493,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const method = isEdit ? 'PUT' : 'POST';
 
     try {
-      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} usuario "${userNameInput.value.trim()}"...`);
+      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} alumno "${userNameInput.value.trim()}" (ID: ${userIdInput.value.trim()})...`);
       const res = await fetch(url, {
         method: method,
-        body: formData // Let the browser set the proper Multipart boundary
+        body: formData // Browser sets proper boundary
       });
 
       const responseData = await res.json();
 
       if (res.ok) {
-        if (responseData.syncError) {
-          appendConsoleLog('warning', `Guardado local exitoso, pero biométrico reportó: ${responseData.syncError}`);
-          alert(`Guardado localmente. Advertencia del biométrico: ${responseData.syncError}`);
-        } else if (responseData.synced) {
-          appendConsoleLog('success', `Usuario "${userNameInput.value.trim()}" sincronizado correctamente en el biométrico.`);
-        } else {
-          appendConsoleLog('success', `Usuario "${userNameInput.value.trim()}" guardado localmente (biométrico no configurado).`);
+        appendConsoleLog('success', `Alumno "${userNameInput.value.trim()}" guardado en la base de datos local SQLite.`);
+
+        if (responseData.syncSummary) {
+          appendConsoleLog(responseData.synced ? 'success' : 'warning', `Biométrico MinMoe: ${responseData.syncSummary}`);
         }
+
+        if (responseData.diagnostics && responseData.diagnostics.length > 0) {
+          responseData.diagnostics.forEach(diag => {
+            appendConsoleLog('info', `  └─ ${diag}`);
+          });
+        }
+
+        let alertMessage = `Alumno "${userNameInput.value.trim()}" registrado en base de datos local.`;
+        if (responseData.synced) {
+          alertMessage += `\n\n✓ Sincronizado exitosamente con el biométrico MinMoe.`;
+        } else if (responseData.syncSummary) {
+          alertMessage += `\n\n⚠️ Aviso del biométrico:\n${responseData.syncSummary}`;
+        }
+        alert(alertMessage);
+
         hideUserForm();
         refreshUsers();
       } else {
-        throw new Error(responseData.error || 'Error al guardar');
+        const errorMsg = responseData.error || 'Error al guardar el alumno';
+        appendConsoleLog('error', `Fallo al registrar: ${errorMsg}`);
+        if (responseData.dbError) {
+          appendConsoleLog('error', `  └─ [SQLite Detalle] ${responseData.dbError}`);
+        }
+        alert(`Fallo en el registro:\n${errorMsg}`);
       }
     } catch (err) {
-      alert(`Error al guardar: ${err.message}`);
-      appendConsoleLog('error', `Fallo al guardar: ${err.message}`);
+      alert(`Error de red al guardar: ${err.message}`);
+      appendConsoleLog('error', `Excepción de red al guardar: ${err.message}`);
     }
   });
 

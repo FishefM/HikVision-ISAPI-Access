@@ -153,19 +153,87 @@ async function openDoor(deviceIp, devicePort, username, password, doorChannel = 
     };
   }
 }
+/**
+ * Checks if the ISAPI response indicates success (works with both XML and JSON).
+ */
+function isISAPISuccess(status, data) {
+  if (status !== 200) return false;
+  if (!data) return false;
+  const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+
+  // XML / JSON success patterns
+  const hasSuccessStatusCode = /statusCode[">:\s]+1\b/i.test(dataStr);
+  const hasOkStatus = /statusString[">:\s]+["']?OK["']?/i.test(dataStr);
+  const hasOkSubStatus = /subStatusCode[">:\s]+["']?ok["']?/i.test(dataStr);
+  const hasSuccessCheck = /checkResult[">:\s]+["']?success["']?/i.test(dataStr);
+  const hasOkWord = />ok<\/subStatusCode>/i.test(dataStr) || />OK<\/statusString>/i.test(dataStr);
+
+  return hasSuccessStatusCode || hasOkStatus || hasOkSubStatus || hasSuccessCheck || hasOkWord;
+}
+
+/**
+ * Extracts a human-readable diagnostic message from an ISAPI response.
+ */
+function extractISAPIDiagnostic(data, fallbackError = null) {
+  if (!data) return fallbackError || 'Sin respuesta del dispositivo biométrico';
+  const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+
+  let statusString = null;
+  let subStatusCode = null;
+  let errorMsg = null;
+
+  const subMatch = dataStr.match(/subStatusCode[">:\s]+["']?([^<"'\s,}]+)/i);
+  if (subMatch) subStatusCode = subMatch[1];
+
+  const statusMatch = dataStr.match(/statusString[">:\s]+["']?([^<"'\s,}]+)/i);
+  if (statusMatch) statusString = statusMatch[1];
+
+  const errorMatch = dataStr.match(/errorMsg[">:\s]+["']?([^<"'\r\n]+)/i);
+  if (errorMatch) errorMsg = errorMatch[1];
+
+  // Specific common Hikvision MinMoe diagnostic translations
+  const translations = {
+    'badParameters': 'Parámetros incompatibles o formato de datos no soportado por este firmware',
+    'employeeNoInvalid': 'ID de empleado inválido (la serie MinMoe suele requerir IDs estrictamente numéricos)',
+    'noFaceDetected': 'No se detectó ningún rostro humano en la imagen',
+    'faceQualityTooLow': 'Calidad de rostro insuficiente (verifique iluminación y mirada frontal)',
+    'faceDataFormatError': 'Formato de imagen inválido (debe ser JPG < 200KB)',
+    'targetNotExist': 'El usuario no existe previamente en la memoria del MinMoe',
+    'cardNoAlreadyExist': 'El número de tarjeta ya está asignado a otro usuario',
+    'deviceError': 'Error interno del lector biométrico',
+    'ok': 'Operación exitosa'
+  };
+
+  const explanation = subStatusCode && translations[subStatusCode] ? ` (${translations[subStatusCode]})` : '';
+
+  const parts = [];
+  if (statusString) parts.push(`Estado: ${statusString}`);
+  if (subStatusCode) parts.push(`SubCódigo: ${subStatusCode}${explanation}`);
+  if (errorMsg) parts.push(`Detalle: ${errorMsg}`);
+
+  if (parts.length > 0) return parts.join(' | ');
+
+  if (fallbackError) return fallbackError;
+  return dataStr.length > 200 ? dataStr.substring(0, 200) + '...' : dataStr;
+}
 
 /**
  * Sends a generic command to the Hikvision device using manual Digest Authentication and custom headers/body.
  */
 async function sendISAPIGenericRequest(deviceIp, devicePort, username, password, method, path, headers = {}, data = null) {
   const url = `http://${deviceIp}:${devicePort}${path}`;
+  const mergedHeaders = {
+    'Accept': 'application/json, application/xml, text/xml, */*',
+    ...headers
+  };
+
   const config = {
     method: method,
     url: url,
-    headers: { ...headers },
+    headers: mergedHeaders,
     data: data,
     validateStatus: (status) => status >= 200 && status < 500, // Permit 401 response for digest challenge
-    timeout: 10000, // 10 second timeout (face upload might take longer)
+    timeout: 10000, // 10 second timeout
   };
 
   try {
@@ -193,23 +261,25 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
       data: response.data
     };
   } catch (error) {
-    console.error(`[Device API] Connection error: ${error.message}`);
+    console.error(`[Device API] Connection error to ${url}: ${error.message}`);
     throw error;
   }
 }
 
 /**
  * Adds or updates a user record on the Hikvision device.
+ * Attempts SetUp (PUT) with full payload, then simplified payload, and then Record (POST).
  */
 async function syncUserInfo(deviceIp, devicePort, username, password, userId, name) {
-  const path = `/ISAPI/AccessControl/UserInfo/SetUp?format=json`;
-  
-  // Format dates for Valid block
-  const payload = {
+  const cleanUserId = String(userId).trim();
+
+  // Payload 1: Complete standard MinMoe payload
+  const fullPayload = {
     UserInfo: {
-      employeeNo: String(userId),
+      employeeNo: cleanUserId,
       name: name,
       userType: "normal",
+      closeDelayEnabled: false,
       Valid: {
         enable: true,
         beginTime: "2026-01-01T00:00:00",
@@ -223,29 +293,71 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
           doorNo: 1,
           planTemplateNo: "1"
         }
-      ]
+      ],
+      maxOpenDoorTime: 0,
+      openDoorTime: 0,
+      roomNumber: 0,
+      floorNumber: 0,
+      localUIRight: false,
+      gender: "unknown",
+      numOfCard: 1,
+      numOfFace: 1
     }
   };
 
+  // Payload 2: Simplified payload without schedule templates
+  const simplifiedPayload = {
+    UserInfo: {
+      employeeNo: cleanUserId,
+      name: name,
+      userType: "normal",
+      Valid: {
+        enable: true,
+        beginTime: "2026-01-01T00:00:00",
+        endTime: "2046-01-01T23:59:59",
+        timeType: "local"
+      },
+      doorRight: "1"
+    }
+  };
+
+  let lastResult = null;
+
   try {
-    let result = await sendISAPIGenericRequest(
+    // Intento 1: UserInfo/SetUp (PUT) con payload completo
+    lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
       'PUT',
-      path,
+      `/ISAPI/AccessControl/UserInfo/SetUp?format=json`,
       { 'Content-Type': 'application/json' },
-      payload
+      fullPayload
     );
 
-    let dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-    let isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
 
-    // Fallback: Si SetUp falla o no está soportado, intentar con Record (POST)
+    // Intento 2: Si falló, intentar SetUp (PUT) con payload simplificado
+    if (!isSuccess) {
+      console.log(`[Device API] Reintentando registro de usuario con payload simplificado (PUT)...`);
+      lastResult = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'PUT',
+        `/ISAPI/AccessControl/UserInfo/SetUp?format=json`,
+        { 'Content-Type': 'application/json' },
+        simplifiedPayload
+      );
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    }
+
+    // Intento 3: Si falló, intentar UserInfo/Record (POST)
     if (!isSuccess) {
       console.log(`[Device API] Reintentando registro de usuario con UserInfo/Record (POST)...`);
-      result = await sendISAPIGenericRequest(
+      lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
         username,
@@ -253,23 +365,26 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
         'POST',
         `/ISAPI/AccessControl/UserInfo/Record?format=json`,
         { 'Content-Type': 'application/json' },
-        payload
+        simplifiedPayload
       );
-      dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-      isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
     }
 
-    console.log(`[Device API] User sync response: ${JSON.stringify(result.data)}`);
+    const diagnostic = extractISAPIDiagnostic(lastResult.data);
+    console.log(`[Device API] User sync result for ${name} (${cleanUserId}): success=${isSuccess} | ${diagnostic}`);
 
     return {
       success: isSuccess,
-      status: result.status,
-      data: result.data
+      status: lastResult.status,
+      data: lastResult.data,
+      diagnostic: diagnostic
     };
   } catch (error) {
+    console.warn(`[Device API] Error de conexión al sincronizar usuario: ${error.message}`);
     return {
       success: false,
-      error: error.message
+      error: error.message,
+      diagnostic: `Error de red: ${error.message}`
     };
   }
 }
@@ -278,34 +393,38 @@ async function syncUserInfo(deviceIp, devicePort, username, password, userId, na
  * Adds or updates a card record on the Hikvision device linked to the employeeNo.
  */
 async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo, cardNo) {
-  const path = `/ISAPI/AccessControl/CardInfo/SetUp?format=json`;
+  const cleanEmployeeNo = String(employeeNo).trim();
+  const cleanCardNo = String(cardNo).trim();
+
   const payload = {
     CardInfo: {
-      employeeNo: String(employeeNo),
-      cardNo: String(cardNo),
+      employeeNo: cleanEmployeeNo,
+      cardNo: cleanCardNo,
       cardType: "normalCard"
     }
   };
 
+  let lastResult = null;
+
   try {
-    let result = await sendISAPIGenericRequest(
+    // Intento 1: CardInfo/SetUp (PUT)
+    lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
       'PUT',
-      path,
+      `/ISAPI/AccessControl/CardInfo/SetUp?format=json`,
       { 'Content-Type': 'application/json' },
       payload
     );
 
-    let dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-    let isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
 
-    // Fallback: Si SetUp falla, intentar con Record (POST)
+    // Intento 2: Si falló, intentar CardInfo/Record (POST)
     if (!isSuccess) {
       console.log(`[Device API] Reintentando registro de tarjeta con CardInfo/Record (POST)...`);
-      result = await sendISAPIGenericRequest(
+      lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
         username,
@@ -315,78 +434,183 @@ async function syncCardInfo(deviceIp, devicePort, username, password, employeeNo
         { 'Content-Type': 'application/json' },
         payload
       );
-      dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-      isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
     }
 
-    console.log(`[Device API] Card sync response: ${JSON.stringify(result.data)}`);
-    return { success: isSuccess, status: result.status, data: result.data };
+    const diagnostic = extractISAPIDiagnostic(lastResult.data);
+    console.log(`[Device API] Card sync result (${cleanCardNo} -> ${cleanEmployeeNo}): success=${isSuccess} | ${diagnostic}`);
+
+    return {
+      success: isSuccess,
+      status: lastResult.status,
+      data: lastResult.data,
+      diagnostic: diagnostic
+    };
   } catch (error) {
     console.warn(`[Device API] Failed to sync card: ${error.message}`);
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error.message,
+      diagnostic: `Error de red al vincular tarjeta: ${error.message}`
+    };
   }
 }
 
 /**
  * Uploads a user face image to the Hikvision device.
+ * Tries the FDLib endpoint and falls back to the native AccessControl FaceInfo endpoint.
  */
 async function syncUserFace(deviceIp, devicePort, username, password, userId, imageBuffer) {
-  const path = `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`;
+  const cleanUserId = String(userId).trim();
   const boundary = '----Boundary' + crypto.randomBytes(8).toString('hex');
-  
-  const jsonPart = JSON.stringify({
+
+  // Payload para FDLib
+  const jsonPartFDLib = JSON.stringify({
     faceLibType: "normalFD",
     FDID: "1",
-    FPID: String(userId)
+    FPID: cleanUserId
   });
 
-  const parts = [];
-  parts.push(Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="FaceDataRecord"\r\n` +
-    `Content-Type: application/json\r\n\r\n` +
-    `${jsonPart}\r\n`
-  ));
+  const partsFDLib = [
+    Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="FaceDataRecord"\r\n` +
+      `Content-Type: application/json\r\n\r\n` +
+      `${jsonPartFDLib}\r\n`
+    ),
+    Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="faceImage"; filename="${cleanUserId}.jpg"\r\n` +
+      `Content-Type: image/jpeg\r\n\r\n`
+    ),
+    imageBuffer,
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  ];
+  const requestBodyFDLib = Buffer.concat(partsFDLib);
 
-  parts.push(Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="faceImage"; filename="${userId}.jpg"\r\n` +
-    `Content-Type: image/jpeg\r\n\r\n`
-  ));
-
-  parts.push(imageBuffer);
-  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
-
-  const requestBody = Buffer.concat(parts);
+  let lastResult = null;
 
   try {
-    const result = await sendISAPIGenericRequest(
+    // Intento 1: FDLib/FaceDataRecord (POST)
+    console.log(`[Device API] Subiendo rostro vía FDLib/FaceDataRecord (ID: ${cleanUserId})...`);
+    lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
       'POST',
-      path,
+      `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
       { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      requestBody
+      requestBodyFDLib
     );
 
-    console.log(`[Device API] Face upload response: ${JSON.stringify(result.data)}`);
+    let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
 
-    const dataStr = typeof result.data === 'string' ? result.data : JSON.stringify(result.data);
-    const isSuccess = result.status === 200 && (dataStr.includes('statusCode":1') || dataStr.includes('"statusString":"OK"') || dataStr.includes('"ok"'));
+    // Intento 2: Si falló, intentar con AccessControl FaceInfo
+    if (!isSuccess) {
+      console.log(`[Device API] Reintentando rostro vía AccessControl/FaceInfo/Record (POST)...`);
+      const jsonPartFaceInfo = JSON.stringify({
+        faceLibType: "normalFD",
+        FDID: "1",
+        FPID: cleanUserId
+      });
+      const partsFaceInfo = [
+        Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="FaceInfo"\r\n` +
+          `Content-Type: application/json\r\n\r\n` +
+          `${jsonPartFaceInfo}\r\n`
+        ),
+        Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="img"; filename="${cleanUserId}.jpg"\r\n` +
+          `Content-Type: image/jpeg\r\n\r\n`
+        ),
+        imageBuffer,
+        Buffer.from(`\r\n--${boundary}--\r\n`)
+      ];
+      const requestBodyFaceInfo = Buffer.concat(partsFaceInfo);
+
+      lastResult = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'POST',
+        `/ISAPI/AccessControl/FaceInfo/Record?format=json`,
+        { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        requestBodyFaceInfo
+      );
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    }
+
+    const diagnostic = extractISAPIDiagnostic(lastResult.data);
+    console.log(`[Device API] Face upload result (ID: ${cleanUserId}): success=${isSuccess} | ${diagnostic}`);
 
     return {
       success: isSuccess,
-      status: result.status,
-      data: result.data
+      status: lastResult.status,
+      data: lastResult.data,
+      diagnostic: diagnostic
     };
   } catch (error) {
+    console.warn(`[Device API] Failed to upload face: ${error.message}`);
     return {
       success: false,
-      error: error.message
+      error: error.message,
+      diagnostic: `Error de red al subir rostro: ${error.message}`
     };
   }
+}
+
+/**
+ * Unified helper to synchronize a complete user profile (UserInfo + CardInfo + FaceImage) to the Hikvision terminal.
+ */
+async function syncFullUserToDevice(settings, user, imageBuffer = null) {
+  const ip = settings.device_ip;
+  const port = settings.device_port || 80;
+  const userAuth = settings.device_user || 'admin';
+  const pass = settings.device_password || '';
+
+  if (!ip || !userAuth || !pass) {
+    return {
+      synced: false,
+      error: 'Parámetros de conexión del lector biométrico incompletos (IP, Usuario o Contraseña no configurados).',
+      diagnostics: ['Biométrico no configurado']
+    };
+  }
+
+  const diagnostics = [];
+  let userSuccess = false;
+  let cardSuccess = false;
+  let faceSuccess = null;
+
+  // 1. Sincronizar información básica de usuario
+  const userRes = await syncUserInfo(ip, port, userAuth, pass, user.user_id, user.name);
+  diagnostics.push(`Usuario (${user.name}): ${userRes.diagnostic}`);
+  userSuccess = userRes.success;
+
+  // 2. Sincronizar tarjeta (asociada al user_id)
+  const cardRes = await syncCardInfo(ip, port, userAuth, pass, user.user_id, user.user_id);
+  diagnostics.push(`Tarjeta (${user.user_id}): ${cardRes.diagnostic}`);
+  cardSuccess = cardRes.success;
+
+  // 3. Sincronizar rostro si se proporcionó buffer de imagen
+  if (imageBuffer && imageBuffer.length > 0) {
+    const faceRes = await syncUserFace(ip, port, userAuth, pass, user.user_id, imageBuffer);
+    diagnostics.push(`Rostro: ${faceRes.diagnostic}`);
+    faceSuccess = faceRes.success;
+  }
+
+  const overallSuccess = userSuccess;
+  return {
+    synced: overallSuccess,
+    userSuccess,
+    cardSuccess,
+    faceSuccess,
+    diagnostics,
+    summary: diagnostics.join(' — ')
+  };
 }
 
 /**
@@ -429,5 +653,8 @@ module.exports = {
   syncUserInfo,
   syncCardInfo,
   syncUserFace,
-  sendRemoteCheck
+  syncFullUserToDevice,
+  sendRemoteCheck,
+  isISAPISuccess,
+  extractISAPIDiagnostic
 };

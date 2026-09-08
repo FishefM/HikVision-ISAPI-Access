@@ -8,45 +8,37 @@ async function syncAll() {
   console.log(`\n======================================================`);
   console.log(`  SINCRONIZANDO USUARIOS Y TARJETAS AL MÓDULO HIKVISION`);
   console.log(`  Dispositivo IP: ${settings.device_ip}:${settings.device_port}`);
+  console.log(`  Total alumnos en base de datos: ${users.length}`);
   console.log(`======================================================\n`);
 
-  for (const u of users) {
-    console.log(`[INFO] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
-    
-    // 1. Sincronizar usuario
-    const userRes = await device.syncUserInfo(
-      settings.device_ip,
-      settings.device_port,
-      settings.device_user,
-      settings.device_password,
-      u.user_id,
-      u.name
-    );
-
-    if (userRes.success) {
-      console.log(`  ✓ Usuario registrado en biométrico`);
-    } else {
-      console.log(`  ✗ Advertencia al registrar usuario:`, userRes.data || userRes.error);
-    }
-
-    // 2. Sincronizar tarjeta física
-    const cardRes = await device.syncCardInfo(
-      settings.device_ip,
-      settings.device_port,
-      settings.device_user,
-      settings.device_password,
-      u.user_id,
-      u.user_id
-    );
-
-    if (cardRes.success) {
-      console.log(`  ✓ Tarjeta ${u.user_id} vinculada al usuario`);
-    } else {
-      console.log(`  ✗ Advertencia al vincular tarjeta:`, cardRes.data || cardRes.error);
-    }
+  if (!settings.device_ip || !settings.device_user || !settings.device_password) {
+    console.error('[ERROR] Configuración de dispositivo incompleta en SQLite (IP, Usuario o Contraseña).');
+    process.exit(1);
   }
 
-  console.log(`\n¡Proceso de sincronización finalizado!\n`);
+  let okCount = 0;
+  let warnCount = 0;
+
+  for (let i = 0; i < users.length; i++) {
+    const u = users[i];
+    console.log(`\n[${i + 1}/${users.length}] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
+    
+    const res = await device.syncFullUserToDevice(settings, u, null);
+    
+    if (res.synced) {
+      okCount++;
+      console.log(`  ✓ Éxito: Sincronizado en el biométrico.`);
+    } else {
+      warnCount++;
+      console.log(`  ✗ Advertencia: ${res.summary}`);
+    }
+
+    res.diagnostics.forEach(d => console.log(`     └─ ${d}`));
+  }
+
+  console.log(`\n======================================================`);
+  console.log(`  RESUMEN: ${okCount} exitosos | ${warnCount} advertencias de ${users.length} alumnos`);
+  console.log(`======================================================\n`);
   process.exit(0);
 }
 

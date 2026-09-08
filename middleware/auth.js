@@ -1,8 +1,12 @@
 // middleware/auth.js
 const crypto = require('crypto');
 
-// Generate a unique session token for the lifetime of this server process
-const currentSessionToken = crypto.randomBytes(32).toString('hex');
+// Generate a deterministic session token based on server salt so restarts don't kick out the administrator
+function getSessionToken(secret = 'torniquete_admin_session_key_v1') {
+  return crypto.createHash('sha256').update(secret).digest('hex');
+}
+
+const currentSessionToken = getSessionToken();
 
 /**
  * Utility to parse cookies manually from raw request headers.

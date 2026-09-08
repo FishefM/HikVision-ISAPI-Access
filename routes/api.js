@@ -19,6 +19,8 @@ router.get('/users', userController.getUsers);
 router.post('/users', upload.single('faceImage'), userController.addUser);
 router.put('/users/:id', upload.single('faceImage'), userController.updateUser);
 router.delete('/users/:id', userController.deleteUser);
+router.post('/users/sync-all', userController.syncAllUsers);
+router.post('/users/:id/sync-device', userController.syncSingleUser);
 
 // Settings routes
 router.get('/settings', settingsController.getSettings);

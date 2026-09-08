@@ -202,9 +202,14 @@
               <i data-lucide="users"></i>
               <h2>Base de Datos de Usuarios</h2>
             </div>
-            <button id="btn-show-add-user" class="btn btn-success btn-sm">
-              <i data-lucide="user-plus"></i> Registrar Usuario
-            </button>
+            <div class="btn-group" style="display: flex; gap: 0.5rem;">
+              <button id="btn-sync-all-users" class="btn btn-secondary btn-sm" title="Sincronizar todos los alumnos con el MinMoe">
+                <i data-lucide="refresh-cw"></i> Sincronizar al MinMoe
+              </button>
+              <button id="btn-show-add-user" class="btn btn-success btn-sm">
+                <i data-lucide="user-plus"></i> Registrar Usuario
+              </button>
+            </div>
           </div>
           <div class="panel-body">
             <!-- User form modal/section (hidden by default) -->
@@ -214,8 +219,8 @@
                 <input type="hidden" id="user-db-id">
                 <div class="form-row">
                   <div class="form-group flex-1">
-                    <label for="user-id">ID de Usuario (Escaneado)</label>
-                    <input type="text" id="user-id" class="form-input" required placeholder="Ej: 1001 o Card No">
+                    <label for="user-id">ID de Usuario (Numérico o Card No)</label>
+                    <input type="text" id="user-id" class="form-input" required placeholder="Ej: 1001 o ID numérico">
                   </div>
                   <div class="form-group flex-1">
                     <label for="user-name">Nombre Completo</label>
@@ -223,13 +228,14 @@
                   </div>
                 </div>
                 <div class="form-group">
-                  <label for="user-api-url">API URL Relacionada</label>
-                  <input type="url" id="user-api-url" class="form-input" required placeholder="http://api.empresa.com/verify">
+                  <label for="user-api-url">API URL Relacionada (Opcional - Valor por defecto: Asistencia Local)</label>
+                  <input type="url" id="user-api-url" class="form-input" placeholder="http://localhost:3000/api/mock-external-api/allow">
+                  <small class="helper-text">Si se deja en blanco, se asignará la validación local automática.</small>
                 </div>
                 <div class="form-group">
-                  <label for="user-face-image">Foto de Rostro (Opcional - JPG &lt; 200KB)</label>
-                  <input type="file" id="user-face-image" class="form-input" accept="image/jpeg,image/jpg" style="padding: 0.5rem 0.75rem; line-height: 1;">
-                  <small class="helper-text">Si subes una foto, se sincronizará con el biométrico local.</small>
+                  <label for="user-face-image">Foto de Rostro (Opcional - Auto-comprimida a &lt; 200KB)</label>
+                  <input type="file" id="user-face-image" class="form-input" accept="image/jpeg,image/png,image/jpg" style="padding: 0.5rem 0.75rem; line-height: 1;">
+                  <small class="helper-text">Cualquier foto de celular se optimiza automáticamente antes de enviar al biométrico.</small>
                 </div>
                 <div class="btn-group justify-end">
                   <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>
