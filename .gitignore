@@ -94,3 +94,6 @@ Thumbs.db
 # Documentos
 GUIA*
 *.pdf
+
+# Uploads locales
+uploads/

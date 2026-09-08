@@ -384,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Helper to auto-resize and compress images client-side to JPEG < 180KB for Hikvision MinMoe
-  async function optimizeFaceImage(file, maxSizeKB = 180, maxWidth = 800) {
+  async function optimizeFaceImage(file, maxSizeKB = 180, maxDim = 800) {
     if (!file) return null;
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -393,9 +393,14 @@ document.addEventListener('DOMContentLoaded', () => {
         img.onload = () => {
           let width = img.width;
           let height = img.height;
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
           }
           const canvas = document.createElement('canvas');
           canvas.width = width;
@@ -514,11 +519,13 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
 
-        let alertMessage = `Alumno "${userNameInput.value.trim()}" registrado en base de datos local.`;
-        if (responseData.synced) {
-          alertMessage += `\n\n✓ Sincronizado exitosamente con el biométrico MinMoe.`;
+        let alertMessage = `Alumno "${userNameInput.value.trim()}" registrado en base de datos local SQLite.`;
+        if (responseData.faceSuccess === false) {
+          alertMessage += `\n\n[AVISO DEL BIOMETRICO]\nEl alumno fue registrado, pero la fotografia facial no se pudo cargar en el MinMoe.\n\nDetalle:\n${responseData.syncSummary || ''}`;
+        } else if (responseData.synced) {
+          alertMessage += `\n\n[OK] Sincronizado exitosamente con el biometrico MinMoe (Usuario, Tarjeta y Rostro).`;
         } else if (responseData.syncSummary) {
-          alertMessage += `\n\n⚠️ Aviso del biométrico:\n${responseData.syncSummary}`;
+          alertMessage += `\n\n[AVISO]:\n${responseData.syncSummary}`;
         }
         alert(alertMessage);
 
