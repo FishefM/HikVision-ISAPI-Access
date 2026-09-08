@@ -233,7 +233,7 @@ async function updateUser(req, res) {
 }
 
 /**
- * Eliminación de usuarios en SQLite y limpieza de archivos locales
+ * Eliminación de usuarios en el biométrico MinMoe, SQLite y archivos locales
  */
 async function deleteUser(req, res) {
   const id = req.params.id;
@@ -241,24 +241,71 @@ async function deleteUser(req, res) {
     const users = await dbHelper.getUsers();
     const targetUser = users.find(u => String(u.id) === String(id));
 
-    await dbHelper.deleteUser(id);
-    logEvent('info', `[DB OK] Usuario eliminado de SQLite con ID registro: ${id}`);
+    if (!targetUser) {
+      await dbHelper.deleteUser(id);
+      logEvent('warning', `[DB ADVERTENCIA] Usuario con ID registro ${id} no encontrado en memoria, pero se ejecutó borrado.`);
+      return res.json({ success: true, message: 'Usuario no encontrado previamente.' });
+    }
 
-    // Eliminar archivo de foto local si existía
-    if (targetUser && targetUser.user_id) {
+    // Paso 1: Eliminar del hardware biométrico MinMoe
+    let deviceResult = { success: false, diagnostics: [], summary: 'Biométrico no configurado' };
+    try {
+      const settings = await dbHelper.getSettings();
+      if (settings.device_ip && settings.device_user && settings.device_password) {
+        logEvent('info', `[MinMoe] Eliminando alumno "${targetUser.name}" (${targetUser.user_id}) en el biométrico ${settings.device_ip}:${settings.device_port || 80}...`);
+        deviceResult = await deviceHelper.deleteUserFromDevice(
+          settings.device_ip,
+          settings.device_port || 80,
+          settings.device_user,
+          settings.device_password,
+          targetUser.user_id
+        );
+
+        if (deviceResult.success) {
+          logEvent('success', `[MinMoe OK] Alumno "${targetUser.name}" eliminado del biométrico exitosamente.`);
+        } else {
+          logEvent('warning', `[MinMoe ADVERTENCIA] Eliminado en SQLite local pero MinMoe reportó: ${deviceResult.summary}`);
+        }
+
+        deviceResult.diagnostics.forEach(diag => {
+          logEvent(deviceResult.success ? 'info' : 'warning', `  └─ [MinMoe Detalle] ${diag}`);
+        });
+      } else {
+        logEvent('info', '[MinMoe] Eliminación en biométrico omitida: Faltan credenciales del dispositivo en configuración.');
+      }
+    } catch (devErr) {
+      logEvent('error', `[MinMoe ERROR] Error al comunicar con el biométrico durante eliminación: ${devErr.message}`);
+      deviceResult = {
+        success: false,
+        diagnostics: [`Error de red: ${devErr.message}`],
+        summary: devErr.message
+      };
+    }
+
+    // Paso 2: Eliminar de la base de datos local SQLite
+    await dbHelper.deleteUser(id);
+    logEvent('info', `[DB OK] Alumno "${targetUser.name}" (ID registro: ${id}) eliminado de SQLite local.`);
+
+    // Paso 3: Eliminar archivo de foto local si existía
+    if (targetUser.user_id) {
       const localFacePath = path.join(facesDir, `${targetUser.user_id}.jpg`);
       if (fs.existsSync(localFacePath)) {
         try {
           fs.unlinkSync(localFacePath);
-          logEvent('info', `[Almacenamiento Local] Foto eliminada de disco para ID: ${targetUser.user_id}`);
+          logEvent('info', `[Almacenamiento Local] Fotografía en disco eliminada para ID: ${targetUser.user_id}`);
         } catch (_) {}
       }
     }
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      deviceDeleted: deviceResult.success,
+      deviceSummary: deviceResult.summary,
+      diagnostics: deviceResult.diagnostics
+    });
   } catch (e) {
-    logEvent('error', `[DB ERROR] Error al eliminar usuario en SQLite: ${e.message}`);
-    res.status(500).json({ error: `Error de base de datos al eliminar: ${e.message}` });
+    logEvent('error', `[DB ERROR] Error al eliminar usuario: ${e.message}`);
+    res.status(500).json({ error: `Error al eliminar usuario: ${e.message}` });
   }
 }
 

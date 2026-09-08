@@ -235,7 +235,11 @@
                 <div class="form-group">
                   <label for="user-face-image">Foto de Rostro (Opcional - Auto-comprimida a &lt; 200KB)</label>
                   <input type="file" id="user-face-image" class="form-input" accept="image/jpeg,image/png,image/jpg" style="padding: 0.5rem 0.75rem; line-height: 1;">
-                  <small class="helper-text">Cualquier foto de celular se optimiza automáticamente antes de enviar al biométrico.</small>
+                  <small class="helper-text">Cualquier foto se optimiza en formato JPEG sRGB antes de enviar al biométrico.</small>
+                  <div id="face-preview-container" class="hidden" style="margin-top: 0.75rem; text-align: center; background: rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 6px;">
+                    <img id="face-preview-img" src="" alt="Vista previa de rostro" style="max-height: 140px; border-radius: 4px; border: 1px solid #ccc; display: inline-block;">
+                    <div id="face-preview-info" style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;"></div>
+                  </div>
                 </div>
                 <div class="btn-group justify-end">
                   <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>

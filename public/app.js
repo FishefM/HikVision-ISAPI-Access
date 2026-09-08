@@ -251,15 +251,22 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', async (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
         const user = usersList.find(u => u.id === id);
-        if (user && confirm(`¿Está seguro de eliminar al usuario ${user.name}?`)) {
+        if (user && confirm(`¿Está seguro de eliminar al usuario ${user.name} de la base de datos local y del biométrico MinMoe?`)) {
+          appendConsoleLog('info', `Eliminando a "${user.name}" (ID: ${user.user_id})...`);
           try {
             const res = await fetch(`${API_USERS}/${id}`, { method: 'DELETE' });
+            const data = await res.json();
             if (res.ok) {
+              appendConsoleLog('success', `Alumno "${user.name}" eliminado de la base de datos local.`);
+              if (data.deviceSummary) {
+                appendConsoleLog(data.deviceDeleted ? 'success' : 'warning', `Biométrico MinMoe: ${data.deviceSummary}`);
+              }
               refreshUsers();
             } else {
-              throw new Error('Fallo al borrar');
+              throw new Error(data.error || 'Fallo al borrar');
             }
           } catch (err) {
+            appendConsoleLog('error', `Error al eliminar: ${err.message}`);
             alert(`Error: ${err.message}`);
           }
         }
@@ -381,6 +388,10 @@ document.addEventListener('DOMContentLoaded', () => {
     userFormContainer.classList.add('hidden');
     userForm.reset();
     userDbIdInput.value = '';
+    const previewContainer = document.getElementById('face-preview-container');
+    const previewImg = document.getElementById('face-preview-img');
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (previewImg) previewImg.src = '';
   }
 
   // Helper to auto-resize and compress images client-side to JPEG < 180KB for Hikvision MinMoe
@@ -406,6 +417,10 @@ document.addEventListener('DOMContentLoaded', () => {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+
+          // Rellenar con fondo blanco solido para evitar transparencias o fondos oscuros
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
 
           let quality = 0.85;
@@ -431,6 +446,29 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       reader.onerror = () => reject(new Error('Error al leer el archivo de fotografía.'));
       reader.readAsDataURL(file);
+    });
+  }
+
+  // Vista previa de fotografia en el formulario
+  const faceInputEl = document.getElementById('user-face-image');
+  if (faceInputEl) {
+    faceInputEl.addEventListener('change', async () => {
+      const previewContainer = document.getElementById('face-preview-container');
+      const previewImg = document.getElementById('face-preview-img');
+      const previewInfo = document.getElementById('face-preview-info');
+
+      if (faceInputEl.files && faceInputEl.files[0]) {
+        try {
+          const opt = await optimizeFaceImage(faceInputEl.files[0]);
+          if (previewImg && previewContainer && previewInfo) {
+            previewImg.src = URL.createObjectURL(opt);
+            previewInfo.textContent = `Optimizado: ${Math.round(opt.size / 1024)} KB (JPEG sRGB)`;
+            previewContainer.classList.remove('hidden');
+          }
+        } catch (_) {}
+      } else if (previewContainer) {
+        previewContainer.classList.add('hidden');
+      }
     });
   }
 
