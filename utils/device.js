@@ -571,7 +571,7 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
     }
   }
 
-  // Helper to build standard RFC 7578 multipart/form-data with exact Content-Length for Hikvision ISAPI
+  // Helper to build standard RFC 7578 multipart/form-data with filename and exact Content-Length
   function buildMultipart(boundary, jsonPartName, jsonPayload, imagePartName, imgBuf) {
     const jsonStr = typeof jsonPayload === 'string' ? jsonPayload : JSON.stringify(jsonPayload);
     const jsonBuf = Buffer.from(jsonStr, 'utf8');
@@ -583,9 +583,11 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
       `Content-Length: ${jsonBuf.length}\r\n\r\n`
     );
 
+    // CRUCIAL: "filename="face.jpg"" es obligatorio en Hikvision MinMoe para que el sistema
+    // reconozca el buffer binario como archivo de imagen y lo guarde en la ficha del usuario.
     const part2Header = Buffer.from(
       `\r\n--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="${imagePartName}"\r\n` +
+      `Content-Disposition: form-data; name="${imagePartName}"; filename="face.jpg"\r\n` +
       `Content-Type: image/jpeg\r\n` +
       `Content-Length: ${imgBuf.length}\r\n\r\n`
     );
@@ -595,106 +597,57 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
     return Buffer.concat([part1Header, jsonBuf, part2Header, imgBuf, footer]);
   }
 
-  let lastResult = null;
-  let accessControlSuccess = false;
-  let fdLibSuccess = false;
-
-  const boundary = '----HikBoundary' + crypto.randomBytes(8).toString('hex');
+  let boundary = '----HikBoundary' + crypto.randomBytes(8).toString('hex');
   const payloadFD = {
     faceLibType: "blackFD",
     FDID: "1",
-    FPID: cleanUserId,
-    employeeNo: cleanUserId
+    FPID: cleanUserId
   };
   if (userName) {
     payloadFD.name = String(userName).trim();
   }
 
-  const bodyFD = buildMultipart(boundary, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
+  let bodyFD = buildMultipart(boundary, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
 
   try {
     // =========================================================================
-    // PASO 1: Vincular foto directamente al usuario de Control de Acceso
-    // Endpoint: PUT /ISAPI/AccessControl/FaceInfo/SetUp?format=json
-    // Este es el endpoint que lee la plataforma web de Hikvision al editar usuarios.
+    // PASO 1: Subir rostro al motor inteligente (FDLib/FaceDataRecord)
+    // Este es el endpoint oficial de Hikvision para almacenar fotos de rostro
     // =========================================================================
-    console.log(`[Device API Face] Vinculando rostro en AccessControl/FaceInfo/SetUp (ID: ${cleanUserId}, ${Math.round(imageBuffer.length / 1024)} KB)...`);
-    lastResult = await sendISAPIGenericRequest(
+    console.log(`[Device API Face] Subiendo rostro a FDLib/FaceDataRecord (POST, ID: ${cleanUserId}, ${Math.round(imageBuffer.length / 1024)} KB)...`);
+    let lastResult = await sendISAPIGenericRequest(
       deviceIp,
       devicePort,
       username,
       password,
-      'PUT',
-      `/ISAPI/AccessControl/FaceInfo/SetUp?format=json`,
+      'POST',
+      `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
       { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
       bodyFD
     );
 
-    accessControlSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+    let isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
     let dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
 
-    // Si falló SetUp, reintentar con POST AccessControl/FaceInfo/Record
-    if (!accessControlSuccess && !/SubpicAnalysisModelingError|noFaceDetected|faceQualityTooLow/i.test(dataStr)) {
-      console.log(`[Device API Face] Intentando AccessControl/FaceInfo/Record (POST)...`);
+    // PASO 2: Si el rostro ya existe en FDLib, actualizar con PUT
+    if (!isSuccess && /alreadyExist|deviceUserAlreadyExistFace|deviceUserAlreadyExist/i.test(dataStr)) {
+      console.log(`[Device API Face] Rostro ya existe en FDLib. Actualizando con PUT...`);
       lastResult = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
         username,
         password,
-        'POST',
-        `/ISAPI/AccessControl/FaceInfo/Record?format=json`,
-        { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-        bodyFD
-      );
-      accessControlSuccess = isISAPISuccess(lastResult.status, lastResult.data);
-      dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
-    }
-
-    // =========================================================================
-    // PASO 2: Registrar rostro en el motor inteligente de reconocimiento facial (FDLib)
-    // Endpoint: POST /ISAPI/Intelligent/FDLib/FaceDataRecord?format=json
-    // =========================================================================
-    if (!/SubpicAnalysisModelingError|noFaceDetected|faceQualityTooLow/i.test(dataStr)) {
-      console.log(`[Device API Face] Registrando en motor de reconocimiento FDLib/FaceDataRecord (POST, ID: ${cleanUserId})...`);
-      const fdResult = await sendISAPIGenericRequest(
-        deviceIp,
-        devicePort,
-        username,
-        password,
-        'POST',
+        'PUT',
         `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
         { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
         bodyFD
       );
-
-      fdLibSuccess = isISAPISuccess(fdResult.status, fdResult.data);
-      const fdDataStr = typeof fdResult.data === 'string' ? fdResult.data : JSON.stringify(fdResult.data || {});
-
-      // Si ya existía en FDLib, actualizar con PUT
-      if (!fdLibSuccess && /alreadyExist|deviceUserAlreadyExistFace|deviceUserAlreadyExist/i.test(fdDataStr)) {
-        console.log(`[Device API Face] Actualizando en FDLib con PUT...`);
-        const putResult = await sendISAPIGenericRequest(
-          deviceIp,
-          devicePort,
-          username,
-          password,
-          'PUT',
-          `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
-          { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-          bodyFD
-        );
-        fdLibSuccess = isISAPISuccess(putResult.status, putResult.data);
-        if (fdLibSuccess) lastResult = putResult;
-      } else if (fdLibSuccess) {
-        lastResult = fdResult;
-      }
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+      dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
     }
 
-    // =========================================================================
-    // PASO 3: Si ambos fallaron debido a un registro previo corrupto o bloqueado,
-    // eliminamos el rostro y reintentamos en limpio.
-    // =========================================================================
-    if (!accessControlSuccess && !fdLibSuccess && /alreadyExist|deviceUserAlreadyExistFace|deviceUserAlreadyExist/i.test(dataStr)) {
+    // PASO 3: Si PUT falló o sigue marcando duplicado bloqueado, eliminar registro y reintentar POST en limpio
+    if (!isSuccess && /alreadyExist|deviceUserAlreadyExistFace|deviceUserAlreadyExist/i.test(dataStr)) {
       console.log(`[Device API Face] Limpiando registro anterior de rostro para ID: ${cleanUserId} antes de reintentar...`);
       await sendISAPIGenericRequest(
         deviceIp,
@@ -707,49 +660,73 @@ async function syncUserFace(deviceIp, devicePort, username, password, userId, im
         { FaceInfoDelCond: { EmployeeNoList: [{ employeeNo: cleanUserId }] } }
       ).catch(() => {});
 
-      const boundaryRetry = '----HikBoundary' + crypto.randomBytes(8).toString('hex');
-      const bodyRetry = buildMultipart(boundaryRetry, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
+      boundary = '----HikBoundary' + crypto.randomBytes(8).toString('hex');
+      bodyFD = buildMultipart(boundary, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
 
-      // Reintentar SetUp
       lastResult = await sendISAPIGenericRequest(
-        deviceIp,
-        devicePort,
-        username,
-        password,
-        'PUT',
-        `/ISAPI/AccessControl/FaceInfo/SetUp?format=json`,
-        { 'Content-Type': `multipart/form-data; boundary=${boundaryRetry}` },
-        bodyRetry
-      );
-      accessControlSuccess = isISAPISuccess(lastResult.status, lastResult.data);
-
-      // Reintentar FDLib
-      const retryFD = await sendISAPIGenericRequest(
         deviceIp,
         devicePort,
         username,
         password,
         'POST',
         `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
-        { 'Content-Type': `multipart/form-data; boundary=${boundaryRetry}` },
-        bodyRetry
+        { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        bodyFD
       );
-      fdLibSuccess = isISAPISuccess(retryFD.status, retryFD.data);
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+      dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
     }
 
-    const overallSuccess = accessControlSuccess || fdLibSuccess;
-    const diagnostic = extractISAPIDiagnostic(lastResult ? lastResult.data : null);
-    console.log(`[Device API Face Result] ID: ${cleanUserId} -> Exito: ${overallSuccess} (AccessControl: ${accessControlSuccess}, FDLib: ${fdLibSuccess}) | ${diagnostic}`);
+    // PASO 4: Si falló por biblioteca no soportada, reintentar con staticFD
+    if (!isSuccess && /invalidFaceLibType|faceLibTypeNotExist/i.test(dataStr)) {
+      console.log(`[Device API Face] Reintentando con faceLibType: staticFD...`);
+      payloadFD.faceLibType = "staticFD";
+      boundary = '----HikBoundary' + crypto.randomBytes(8).toString('hex');
+      bodyFD = buildMultipart(boundary, "FaceDataRecord", payloadFD, "FaceImage", imageBuffer);
 
-    if (!overallSuccess && lastResult) {
+      lastResult = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'POST',
+        `/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`,
+        { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        bodyFD
+      );
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+      dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
+    }
+
+    // PASO 5: Fallback con AccessControl/FaceInfo/Record si FDLib no estuviera habilitado en el modelo
+    if (!isSuccess && !/SubpicAnalysisModelingError|noFaceDetected|faceQualityTooLow/i.test(dataStr)) {
+      console.log(`[Device API Face] Intentando fallback con AccessControl/FaceInfo/Record...`);
+      lastResult = await sendISAPIGenericRequest(
+        deviceIp,
+        devicePort,
+        username,
+        password,
+        'POST',
+        `/ISAPI/AccessControl/FaceInfo/Record?format=json`,
+        { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        bodyFD
+      );
+      isSuccess = isISAPISuccess(lastResult.status, lastResult.data);
+      dataStr = typeof lastResult.data === 'string' ? lastResult.data : JSON.stringify(lastResult.data || {});
+    }
+
+    const diagnostic = extractISAPIDiagnostic(lastResult ? lastResult.data : null);
+    console.log(`[Device API Face Result] ID: ${cleanUserId} -> Exito: ${isSuccess} | ${diagnostic}`);
+
+    if (!isSuccess && lastResult) {
       console.log(`[Device API Face DEBUG RAW ERROR]: Status: ${lastResult.status} | Data:`, lastResult.data);
     }
 
     return {
-      success: overallSuccess,
+      success: isSuccess,
       status: lastResult ? lastResult.status : null,
       data: lastResult ? lastResult.data : null,
-      diagnostic: overallSuccess ? 'Fotografia facial sincronizada exitosamente en el MinMoe.' : diagnostic
+      diagnostic: isSuccess ? 'Fotografia facial sincronizada exitosamente en el MinMoe.' : diagnostic
     };
   } catch (error) {
     console.warn(`[Device API] Failed to upload face: ${error.message}`);
@@ -1040,7 +1017,6 @@ async function captureFaceFromDevice(settings, timeoutSeconds = 20) {
 
   console.log(`[Device API Capture] Iniciando captura facial remota en MinMoe (${ip})...`);
 
-  // Intentar primero con JSON, luego con XML como fallback
   const jsonCond = {
     CaptureFaceDataCond: {
       captureInfrared: false,
@@ -1048,25 +1024,27 @@ async function captureFaceFromDevice(settings, timeoutSeconds = 20) {
     }
   };
 
-  let initRes = null;
-  try {
-    initRes = await sendISAPIGenericRequest(
-      ip, port, user, pass,
-      'POST',
-      `/ISAPI/AccessControl/CaptureFaceData?format=json`,
-      { 'Content-Type': 'application/json' },
-      JSON.stringify(jsonCond)
-    );
-  } catch (err) {
-    console.log(`[Device API Capture] JSON no aceptado, intentando con XML...`);
+  let initRes = await sendISAPIGenericRequest(
+    ip, port, user, pass,
+    'POST',
+    `/ISAPI/AccessControl/CaptureFaceData?format=json`,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(jsonCond)
+  ).catch(async () => {
     const xmlCond = `<CaptureFaceDataCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureInfrared>false</captureInfrared><dataType>url</dataType></CaptureFaceDataCond>`;
-    initRes = await sendISAPIGenericRequest(
+    return await sendISAPIGenericRequest(
       ip, port, user, pass,
       'POST',
       `/ISAPI/AccessControl/CaptureFaceData`,
       { 'Content-Type': 'application/xml' },
       xmlCond
     );
+  });
+
+  // Si el dispositivo responde 401, 403, 404 o 405 significa que el firmware no permite invocar la cámara por red
+  if (!initRes || initRes.status === 401 || initRes.status === 403 || initRes.status === 404 || initRes.status === 405) {
+    const code = initRes ? initRes.status : 'Timeout';
+    throw new Error(`La captura remota por red no está habilitada en el firmware de este MinMoe (HTTP ${code}). Por favor tome la foto físicamente en la pantalla del lector y pulse "Importar Foto desde MinMoe".`);
   }
 
   const startTime = Date.now();
@@ -1088,6 +1066,8 @@ async function captureFaceFromDevice(settings, timeoutSeconds = 20) {
         'GET',
         `/ISAPI/AccessControl/CaptureFaceData/Progress?format=json`
       );
+      if (progRes.status === 401 || progRes.status === 405) break;
+
       const dataStr = typeof progRes.data === 'string' ? progRes.data : JSON.stringify(progRes.data || {});
       const progMatch = dataStr.match(/captureProgress[">:\s]+["']?(\d+)/i);
       const progress = progMatch ? parseInt(progMatch[1], 10) : 0;
@@ -1105,7 +1085,7 @@ async function captureFaceFromDevice(settings, timeoutSeconds = 20) {
   }
 
   if (!capturedUrl) {
-    throw new Error('Tiempo de espera agotado. No se detectó ningún rostro frente a la cámara del biométrico.');
+    throw new Error('La captura remota no fue completada por el biométrico. Por favor tome la foto directamente en la pantalla física del MinMoe y pulse "Importar Foto desde MinMoe".');
   }
 
   console.log(`[Device API Capture] Descargando imagen capturada desde ${capturedUrl}...`);
@@ -1145,7 +1125,7 @@ async function fetchFaceFromDevice(settings, userId) {
     FPID: cleanUserId
   };
 
-  const res = await sendISAPIGenericRequest(
+  let res = await sendISAPIGenericRequest(
     ip, port, user, pass,
     'POST',
     `/ISAPI/Intelligent/FDLib/FDSearch?format=json`,
@@ -1153,8 +1133,27 @@ async function fetchFaceFromDevice(settings, userId) {
     searchPayload
   );
 
-  const dataStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data || {});
-  const picUrlMatch = dataStr.match(/picURL[">:\s]+["']?([^<"'\r\n}]+)/i) || dataStr.match(/faceURL[">:\s]+["']?([^<"'\r\n}]+)/i);
+  let dataStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data || {});
+  let picUrlMatch = dataStr.match(/picURL[">:\s]+["']?([^<"'\r\n}]+)/i) || dataStr.match(/faceURL[">:\s]+["']?([^<"'\r\n}]+)/i);
+
+  // Si no se encontró en blackFD, reintentar con staticFD
+  if (!picUrlMatch || !picUrlMatch[1]) {
+    searchPayload.faceLibType = "staticFD";
+    try {
+      const resStatic = await sendISAPIGenericRequest(
+        ip, port, user, pass,
+        'POST',
+        `/ISAPI/Intelligent/FDLib/FDSearch?format=json`,
+        { 'Content-Type': 'application/json' },
+        searchPayload
+      );
+      const dataStrStatic = typeof resStatic.data === 'string' ? resStatic.data : JSON.stringify(resStatic.data || {});
+      const matchStatic = dataStrStatic.match(/picURL[">:\s]+["']?([^<"'\r\n}]+)/i) || dataStrStatic.match(/faceURL[">:\s]+["']?([^<"'\r\n}]+)/i);
+      if (matchStatic && matchStatic[1]) {
+        picUrlMatch = matchStatic;
+      }
+    } catch (_) {}
+  }
 
   if (!picUrlMatch || !picUrlMatch[1]) {
     throw new Error(`El usuario "${cleanUserId}" no tiene fotografía registrada en el MinMoe.`);
