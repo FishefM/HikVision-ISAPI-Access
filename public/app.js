@@ -82,7 +82,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==========================================================================
   // SSE Event Stream Integration
-  // ==========================================================================
+  let refreshLogsTimer = null;
+  function debouncedRefreshLogs() {
+    if (refreshLogsTimer) clearTimeout(refreshLogsTimer);
+    refreshLogsTimer = setTimeout(() => {
+      refreshLogs();
+    }, 400);
+  }
+
   function connectEventStream() {
     const source = new EventSource('/api/logs-stream');
     
@@ -93,8 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeStr = logData.timestamp ? (logData.timestamp.includes(' ') ? logData.timestamp.split(' ')[1] : logData.timestamp) : '';
         appendConsoleLog(logData.type, logData.message, timeStr);
         
-        // Refresh logs and statistics on any new activity
-        refreshLogs();
+        // Refresh logs and statistics on any new activity with debounce
+        debouncedRefreshLogs();
       } catch (err) {
         console.error('Error parsing SSE event:', err);
       }

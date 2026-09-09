@@ -93,11 +93,9 @@ async function sendISAPICommand(deviceIp, devicePort, username, password, method
 
   try {
     // Step 1: Send request without authentication to get the 401 challenge
-    console.log(`[Device API] Sending initial ${method} to ${url}...`);
     let response = await axios(config);
     
     if (response.status === 401) {
-      console.log(`[Device API] Received 401 challenge. Calculating Digest...`);
       const authHeaderRaw = response.headers['www-authenticate'];
       if (!authHeaderRaw) {
         throw new Error('401 Unauthorized received, but WWW-Authenticate header was missing.');
@@ -108,7 +106,6 @@ async function sendISAPICommand(deviceIp, devicePort, username, password, method
       
       // Step 2: Retry the request with the Authorization header
       config.headers['Authorization'] = authHeader;
-      console.log(`[Device API] Retrying ${method} with Digest Authentication...`);
       response = await axios(config);
     }
     
@@ -135,7 +132,6 @@ async function openDoor(deviceIp, devicePort, username, password, doorChannel = 
 
   try {
     const result = await sendISAPICommand(deviceIp, devicePort, username, password, 'PUT', path, xmlBody);
-    console.log(`[Device API] Door open request response status: ${result.status}`);
     
     // Check if result contains success indicators
     const isSuccess = result.status === 200 && 
@@ -261,11 +257,9 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
   };
 
   try {
-    console.log(`[Device API] Sending generic ${method} to ${url}...`);
     let response = await axios(config);
     
     if (response.status === 401) {
-      console.log(`[Device API] Received 401 challenge. Calculating Digest...`);
       const authHeaderRaw = response.headers['www-authenticate'];
       if (!authHeaderRaw) {
         throw new Error('401 Unauthorized received, but WWW-Authenticate header was missing.');
@@ -275,7 +269,6 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
       const authHeader = calculateDigestHeader(method, path, authParams, username, password);
       
       config.headers['Authorization'] = authHeader;
-      console.log(`[Device API] Retrying ${method} with Digest Authentication...`);
       response = await axios(config);
     }
     
@@ -724,7 +717,6 @@ async function sendRemoteCheck(deviceIp, devicePort, username, password, serialN
       { 'Content-Type': 'application/json' },
       payload
     );
-    console.log(`[Device API] RemoteCheck result sent (Serial: ${serialNo}, Result: ${authorized ? 'success' : 'failed'}): Status ${result.status}`);
     return { success: result.status === 200, status: result.status, data: result.data };
   } catch (error) {
     console.warn(`[Device API] Failed to send PUT RemoteCheck: ${error.message}`);

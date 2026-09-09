@@ -25,18 +25,6 @@ function extractDeviceRequestInfo(req) {
   let eventType = 'unknown';
   let isHeartbeat = false;
 
-  // Imprimir cuerpo recibido completo para depuracion
-  if (req.rawBody) {
-    const preview = req.rawBody.length > 3000 ? req.rawBody.substring(0, 3000) + '... [TRUNCATED]' : req.rawBody;
-    console.log(`[DEBUG Request Hikvision (${req.headers['content-type'] || 'sin content-type'})]:\n${preview}`);
-  } else {
-    console.log(`[DEBUG Request Hikvision]: Cuerpo vacio o no capturado. Content-Type: ${req.headers['content-type']}`);
-  }
-
-  if (req.body && !isHeartbeat) {
-    console.log(`[DEBUG Parsed JSON/XML Body]:\n${JSON.stringify(req.body, null, 2)}`);
-  }
-
   // Detecta si la solicitud es un latido (heartbeat)
   if (req.rawBody && /heartbeat/i.test(req.rawBody)) {
     isHeartbeat = true;
@@ -310,16 +298,11 @@ async function executeAccessValidation(reqInfo, clientIp) {
 async function processAccessRequest(reqInfo, clientIp) {
   const { userId, serialNo, eventType } = reqInfo;
 
-  logEvent('info', `=== Nueva solicitud de acceso ===`);
-  logEvent('info', `Dispositivo IP: ${clientIp}`);
-  logEvent('info', `ID de Usuario extraído: ${userId || 'No encontrado'}`);
-  logEvent('info', `Event Serial No: ${serialNo}`);
-  logEvent('info', `Tipo de verificación: ${eventType}`);
-
   if (!userId) {
-    logEvent('info', `Evento de hardware sin credencial (Serial: ${serialNo}). Omitiendo validación.`);
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
+
+  logEvent('info', `=== Solicitud de acceso: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`);
 
   const cleanUserId = String(userId).trim();
 
@@ -386,8 +369,6 @@ const handleDevicePOST = async (req, res) => {
   const clientIp = req.ip || req.connection.remoteAddress;
 
   if (reqInfo.isHeartbeat) {
-    console.log(`[DEBUG] Heartbeat recibido del dispositivo IP: ${clientIp}`);
-    
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
                             (req.rawBody && req.rawBody.includes('application/json'));
@@ -417,8 +398,6 @@ const handleDevicePOST = async (req, res) => {
 
   // Si no contiene ID de usuario, es un evento de hardware auxiliar (puerta abierta, cerrada, etc.)
   if (!reqInfo.userId) {
-    console.log(`[INFO Hardware] Evento de hardware auxiliar recibido (Serial: ${reqInfo.serialNo}, Modo: ${reqInfo.eventType}). Confirmando recepción sin alterar pantalla.`);
-    
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
                             (req.rawBody && req.rawBody.includes('application/json'));
