@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   async function refreshUsers() {
     try {
-      const res = await fetch(API_USERS);
+      const res = await fetch(`${API_USERS}?filter=production`);
       if (res.status === 401) {
         window.location.href = '/login.html';
         return;
@@ -351,7 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function populateSimulatorOptions() {
-    // Keep first option
+    if (!simUserIdSelect) return;
     simUserIdSelect.innerHTML = `<option value="">-- Cargar usuarios del sistema --</option>`;
     
     usersList.forEach(user => {
@@ -535,17 +535,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Simulator Controls
   // ==========================================================================
-  btnSimulateScan.addEventListener('click', async () => {
-    const val = simUserIdSelect.value;
-    if (!val) {
-      // Allow custom typing of an ID for simulation
-      const customId = prompt("Ingrese un ID de usuario a simular (ej. 1001 o uno no registrado):");
-      if (!customId) return;
-      triggerSimulation(customId.trim());
-    } else {
-      triggerSimulation(val);
-    }
-  });
+  if (btnSimulateScan && simUserIdSelect) {
+    btnSimulateScan.addEventListener('click', async () => {
+      const val = simUserIdSelect.value;
+      if (!val) {
+        // Allow custom typing of an ID for simulation
+        const customId = prompt("Ingrese un ID de usuario a simular (ej. 1001 o uno no registrado):");
+        if (!customId) return;
+        triggerSimulation(customId.trim());
+      } else {
+        triggerSimulation(val);
+      }
+    });
+  }
 
   async function triggerSimulation(userId) {
     try {
@@ -572,25 +574,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Direct Door Open Test
-  btnTestOpen.addEventListener('click', async () => {
-    btnTestOpen.disabled = true;
-    appendConsoleLog('info', 'Enviando comando manual de apertura al dispositivo...');
-    try {
-      const res = await fetch(API_TEST_OPEN, { method: 'POST' });
-      const data = await res.json();
-      
-      if (res.ok && data.success) {
-        appendConsoleLog('success', 'Comando de apertura ejecutado. El dispositivo respondió OK.');
-      } else {
-        throw new Error(data.error || 'Respuesta errónea del dispositivo');
+  if (btnTestOpen) {
+    btnTestOpen.addEventListener('click', async () => {
+      btnTestOpen.disabled = true;
+      appendConsoleLog('info', 'Enviando comando manual de apertura al dispositivo...');
+      try {
+        const res = await fetch(API_TEST_OPEN, { method: 'POST' });
+        const data = await res.json();
+        
+        if (res.ok && data.success) {
+          appendConsoleLog('success', 'Comando de apertura ejecutado. El dispositivo respondió OK.');
+        } else {
+          throw new Error(data.error || 'Respuesta errónea del dispositivo');
+        }
+      } catch (err) {
+        appendConsoleLog('error', `Error al abrir la puerta: ${err.message}`);
+        alert(`Fallo en hardware: ${err.message}. Revise IP y contraseña de red del dispositivo en la sección inferior.`);
+      } finally {
+        btnTestOpen.disabled = false;
       }
-    } catch (err) {
-      appendConsoleLog('error', `Error al abrir la puerta: ${err.message}`);
-      alert(`Fallo en hardware: ${err.message}. Revise IP y contraseña de red del dispositivo en la sección inferior.`);
-    } finally {
-      btnTestOpen.disabled = false;
-    }
-  });
+    });
+  }
 
   // Clear Database Access Logs History
   btnClearDbLogs.addEventListener('click', async () => {

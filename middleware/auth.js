@@ -60,7 +60,7 @@ const authMiddleware = (req, res, next) => {
   }
 
   // Redirect page requests to login.html
-  if (req.path === '/' || req.path.endsWith('.html')) {
+  if (req.path === '/' || req.path === '/pruebas' || req.path.endsWith('.html')) {
     return res.redirect('/login.html');
   }
 

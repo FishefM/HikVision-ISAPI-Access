@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Torniquete Link - Entorno de Pruebas</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="glass-bg"></div>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-logo">
+        <i data-lucide="flask-conical" class="logo-icon"></i>
+        <div>
+          <h1>Torniquete Link - Entorno de Pruebas</h1>
+          <p>Simulador de Lecturas, Usuarios Demo y Pruebas de Hardware</p>
+        </div>
+      </div>
+      <div class="header-status" style="display: flex; align-items: center; gap: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="status-indicator online"></span>
+          <span class="status-text">Modo Pruebas</span>
+        </div>
+        <a href="/" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Volver al panel de control principal">
+          <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i>
+          <span>Panel Principal</span>
+        </a>
+        <a href="/feedback.html" target="_blank" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Abrir pantalla de visualización para alumnos">
+          <i data-lucide="tv" style="width: 14px; height: 14px;"></i>
+          <span>Pantalla Feedback</span>
+        </a>
+        <button id="btn-logout" class="btn btn-danger btn-sm" style="display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; background: rgba(255, 23, 68, 0.15); border: 1px solid rgba(255, 23, 68, 0.3); color: #ff5252;">
+          <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+          <span>Cerrar Sesión</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <section class="metrics-grid">
+      <div class="metric-card glass">
+        <div class="metric-icon info-tint">
+          <i data-lucide="users"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value" id="metric-test-users">0</span>
+          <span class="metric-label">Usuarios de Prueba</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon success-tint">
+          <i data-lucide="check-circle-2"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value text-success" id="metric-sim-authorized">0</span>
+          <span class="metric-label">Simulaciones Exitosas</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon error-tint">
+          <i data-lucide="x-circle"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value text-danger" id="metric-sim-denied">0</span>
+          <span class="metric-label">Simulaciones Denegadas</span>
+        </div>
+      </div>
+      <div class="metric-card glass">
+        <div class="metric-icon warning-tint">
+          <i data-lucide="cpu"></i>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value" id="metric-sim-total">0</span>
+          <span class="metric-label">Total Simulaciones</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Console -->
+    <section class="console-section" style="width: 100%; margin-bottom: 1.5rem;">
+      <div class="panel glass">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i data-lucide="terminal"></i>
+            <h2>Consola de Eventos en Tiempo Real</h2>
+          </div>
+          <button id="btn-clear-console" class="btn btn-icon-only" title="Limpiar Consola">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+        <div class="console-body" id="console-logs" style="max-height: 220px;">
+          <div class="log-line info">
+            <span class="log-time">[---]</span>
+            <span class="log-message">Iniciando escucha de eventos de simulación...</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main class="app-main">
+      <!-- Left Column: Simulator Controls -->
+      <div class="main-column">
+        <!-- Simulator Panel -->
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="cpu"></i>
+              <h2>Simulador de Escaneos</h2>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="simulator-controls">
+              <div class="form-group">
+                <label for="sim-user-id">Seleccionar Usuario de Prueba</label>
+                <select id="sim-user-id" class="form-input">
+                  <option value="">-- Cargar usuarios de prueba --</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="sim-custom-id">O ingresar ID Manual / No registrado</label>
+                <input type="text" id="sim-custom-id" class="form-input" placeholder="Ej: 1001, 9999, cda21c1f...">
+              </div>
+
+              <div class="form-group">
+                <label for="sim-mode">Modo de Verificación a Simular</label>
+                <select id="sim-mode" class="form-input">
+                  <option value="card">Tarjeta de Proximidad (card)</option>
+                  <option value="face">Reconocimiento Facial (face)</option>
+                  <option value="qrCode">Código QR (qrCode)</option>
+                  <option value="barcode">Código de Barras (barcode)</option>
+                  <option value="faceOrFpOrCardOrPw">Cualquiera (faceOrFpOrCardOrPw)</option>
+                </select>
+              </div>
+
+              <div style="margin-top: 1rem;">
+                <button id="btn-simulate-scan" class="btn btn-primary" style="width: 100%; justify-content: center;">
+                  <i data-lucide="play"></i> Ejecutar Simulación de Escaneo
+                </button>
+              </div>
+
+              <!-- Simulation Result Preview -->
+              <div id="sim-result-box" class="hidden" style="margin-top: 1rem; padding: 0.85rem; border-radius: var(--radius-sm); font-size: 0.85rem; border: 1px solid var(--border-color); background: rgba(0,0,0,0.25);">
+                <div style="font-weight: 600; margin-bottom: 0.35rem;" id="sim-result-title">Resultado</div>
+                <div id="sim-result-detail" class="text-muted" style="word-break: break-all;"></div>
+              </div>
+
+              <div class="divider">Prueba de Apertura de Torniquete</div>
+
+              <button id="btn-test-open" class="btn btn-secondary" style="width: 100%; justify-content: center;">
+                <i data-lucide="key-round"></i> Enviar Comando Manual de Apertura (API)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mock APIs Info Card -->
+        <div class="panel glass" style="margin-top: 1.5rem;">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="server"></i>
+              <h2>APIs Mock Locales Disponibles</h2>
+            </div>
+          </div>
+          <div class="panel-body" style="font-size: 0.85rem;">
+            <p style="color: var(--text-muted); margin-bottom: 0.75rem;">
+              Endpoints integrados para probar diferentes escenarios de validación externa sin depender de servicios en la nube:
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <div style="padding: 0.5rem 0.75rem; background: rgba(16, 185, 129, 0.1); border-left: 3px solid var(--success); border-radius: 4px;">
+                <strong class="text-success">Acceso Permitido (200 OK)</strong><br>
+                <code>/api/mock-external-api/allow</code>
+              </div>
+              <div style="padding: 0.5rem 0.75rem; background: rgba(239, 68, 68, 0.1); border-left: 3px solid var(--danger); border-radius: 4px;">
+                <strong class="text-danger">Acceso Denegado (403/Deny)</strong><br>
+                <code>/api/mock-external-api/deny</code>
+              </div>
+              <div style="padding: 0.5rem 0.75rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warning); border-radius: 4px;">
+                <strong class="text-warning">Error Interno (500 Error)</strong><br>
+                <code>/api/mock-external-api/error</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Test Users Table -->
+      <div class="main-column">
+        <div class="panel glass">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="users"></i>
+              <h2>Usuarios de Prueba</h2>
+            </div>
+            <button id="btn-show-add-test-user" class="btn btn-success btn-sm">
+              <i data-lucide="user-plus"></i> Registrar Usuario de Prueba
+            </button>
+          </div>
+          <div class="panel-body">
+            <!-- Form modal (hidden by default) -->
+            <div id="test-user-form-container" class="form-panel hidden">
+              <h3 id="test-user-form-title">Registrar Usuario de Prueba</h3>
+              <form id="test-user-form">
+                <input type="hidden" id="test-user-db-id">
+                <div class="form-row">
+                  <div class="form-group flex-1">
+                    <label for="test-user-id">ID de Usuario</label>
+                    <input type="text" id="test-user-id" class="form-input" required placeholder="Ej: 1004">
+                  </div>
+                  <div class="form-group flex-1">
+                    <label for="test-user-name">Nombre</label>
+                    <input type="text" id="test-user-name" class="form-input" required placeholder="Ej: Usuario Demo (Permitido)">
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="test-user-api-url">API URL de Validación</label>
+                  <input type="url" id="test-user-api-url" class="form-input" placeholder="http://localhost:3000/api/mock-external-api/allow">
+                </div>
+
+                <!-- Preset shortcuts -->
+                <div style="margin-bottom: 1rem;">
+                  <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">Atajos de configuración rápida:</span>
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary btn-sm preset-btn" data-type="allow" style="font-size: 0.75rem;">
+                      Preset Permitido
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm preset-btn" data-type="deny" style="font-size: 0.75rem;">
+                      Preset Denegado
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm preset-btn" data-type="error" style="font-size: 0.75rem;">
+                      Preset Error 500
+                    </button>
+                  </div>
+                </div>
+
+                <div class="btn-group justify-end">
+                  <button type="button" id="btn-cancel-test-user" class="btn btn-secondary btn-sm">Cancelar</button>
+                  <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+                </div>
+              </form>
+              <div class="divider"></div>
+            </div>
+
+            <!-- Users Table -->
+            <div class="table-container">
+              <table class="data-table" id="test-users-table">
+                <thead>
+                  <tr>
+                    <th style="width: 18%;">ID</th>
+                    <th style="width: 25%;">Nombre</th>
+                    <th style="width: 32%;">API URL</th>
+                    <th style="width: 25%; text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colspan="4" class="text-center">Cargando usuarios de prueba...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Recent Logs Section -->
+    <section class="logs-section" style="width: 100%; margin-top: 1.5rem;">
+      <div class="panel glass">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i data-lucide="history"></i>
+            <h2>Historial Reciente de Pruebas</h2>
+          </div>
+          <button id="btn-clear-db-logs" class="btn btn-icon-only text-danger" title="Limpiar Historial">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="table-container" style="max-height: 380px;">
+            <table class="data-table" id="test-logs-table">
+              <thead>
+                <tr>
+                  <th style="width: 14%;">Fecha/Hora</th>
+                  <th style="width: 18%;">Usuario</th>
+                  <th style="width: 12%;">Tipo</th>
+                  <th style="width: 28%;">API URL</th>
+                  <th style="width: 16%;">Respuesta</th>
+                  <th style="width: 12%;">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="6" class="text-center">Cargando historial...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- QR Code Modal -->
+  <div id="qr-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 360px; padding: 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Credencial de Prueba</h3>
+        <button id="btn-close-qr-icon" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center;" title="Cerrar">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+        </button>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
+        <div style="width: 100%; display: flex; justify-content: center; align-items: center;">
+          <img id="qr-modal-image" src="" alt="Credencial de Prueba" style="width: 100%; max-width: 290px; height: auto; display: block; cursor: grab; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.6);" draggable="true" />
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; width: 100%; margin-top: 0.25rem;">
+          <button type="button" id="btn-qr-download" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            <i data-lucide="download" style="width: 16px; height: 16px;"></i> Guardar Imagen
+          </button>
+          <button type="button" id="btn-qr-copy" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;">
+            <i data-lucide="copy" style="width: 16px; height: 16px;"></i> Copiar Imagen
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="pruebas.js"></script>
+</body>
+</html>

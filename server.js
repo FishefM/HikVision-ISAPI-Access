@@ -33,6 +33,11 @@ app.use('/', deviceRoutes);
 // Mount Admin REST API endpoints
 app.use('/api', apiRoutes);
 
+// Route for testing and simulation environment
+app.get('/pruebas', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'pruebas.html'));
+});
+
 // Serve dashboard static assets
 app.use(express.static(path.join(__dirname, 'public')));
 

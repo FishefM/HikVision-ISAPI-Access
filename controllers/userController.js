@@ -8,11 +8,37 @@ const deviceHelper = require('../utils/device');
 //-----------------------------------
 
 /**
- * Obtiene usuarios registrados de la base de datos local SQLite
+ * Determina si un registro corresponde a un usuario de pruebas o a un alumno real
+ */
+function isTestUser(user) {
+  if (!user) return false;
+  const uid = String(user.user_id || '').trim();
+  const url = String(user.api_url || '').toLowerCase();
+  const name = String(user.name || '').toLowerCase();
+  
+  return /^100\d*$/.test(uid) || 
+         url.includes('mock-external-api') || 
+         url.includes('localhost:3000/api/mock') || 
+         url.includes('127.0.0.1:3000/api/mock') ||
+         name.includes('(permitido)') || 
+         name.includes('(denegado)') || 
+         name.includes('(error api)') ||
+         name.includes('prueba');
+}
+
+/**
+ * Obtiene usuarios registrados de la base de datos local SQLite,
+ * con soporte para filtrar usuarios reales (producción) o de prueba.
  */
 async function getUsers(req, res) {
   try {
     const users = await dbHelper.getUsers();
+    const filter = req.query.filter;
+    if (filter === 'test' || filter === 'pruebas') {
+      return res.json(users.filter(u => isTestUser(u)));
+    } else if (filter === 'production' || filter === 'main' || filter === 'real') {
+      return res.json(users.filter(u => !isTestUser(u)));
+    }
     res.json(users);
   } catch (e) {
     logEvent('error', `[DB ERROR] Error al consultar lista de alumnos en SQLite: ${e.message}`);
@@ -260,13 +286,16 @@ async function syncAllUsers(req, res) {
       return res.status(400).json({ error: msg });
     }
 
-    const users = await dbHelper.getUsers();
+    let users = await dbHelper.getUsers();
+    if (req.query.includeTests !== 'true') {
+      users = users.filter(u => !isTestUser(u));
+    }
     if (users.length === 0) {
-      logEvent('warning', '[MinMoe] No hay usuarios en la base de datos local para sincronizar.');
-      return res.json({ total: 0, synced: 0, failed: 0, message: 'No hay usuarios en la base de datos.' });
+      logEvent('warning', '[MinMoe] No hay usuarios reales en la base de datos local para sincronizar.');
+      return res.json({ total: 0, synced: 0, failed: 0, message: 'No hay usuarios de producción para sincronizar.' });
     }
 
-    logEvent('info', `[MinMoe] Encontrados ${users.length} alumnos en SQLite. Sincronizando con ${settings.device_ip}:${settings.device_port || 80}...`);
+    logEvent('info', `[MinMoe] Encontrados ${users.length} alumnos reales en SQLite. Sincronizando con ${settings.device_ip}:${settings.device_port || 80}...`);
 
     let syncedCount = 0;
     let failedCount = 0;

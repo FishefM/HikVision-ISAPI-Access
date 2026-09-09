@@ -19,7 +19,7 @@ const requestLogger = (req, res, next) => {
   }
 
   // 3. Omitir consultas GET repetitivas del panel (logs, usuarios, ajustes, vistas html)
-  if (req.method === 'GET' && (url === '/' || url === '/feedback.html' || url.startsWith('/api/logs') || url.startsWith('/api/users') || url.startsWith('/api/settings'))) {
+  if (req.method === 'GET' && (url === '/' || url === '/pruebas' || url === '/feedback.html' || url.startsWith('/api/logs') || url.startsWith('/api/users') || url.startsWith('/api/settings'))) {
     return next();
   }
 

@@ -33,6 +33,10 @@
           <span class="status-indicator online"></span>
           <span class="status-text">Backend Activo</span>
         </div>
+        <a href="/pruebas" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Entorno de simulación y pruebas">
+          <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>
+          <span>Modo Pruebas</span>
+        </a>
         <a href="/feedback.html" target="_blank" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Abrir pantalla de visualización para alumnos">
           <i data-lucide="tv" style="width: 14px; height: 14px;"></i>
           <span>Pantalla Feedback</span>
@@ -109,36 +113,21 @@
     <main class="app-main">
       <!-- Left Column: Operations and Settings -->
       <div class="main-column">
-        <!-- Simulator and Tools -->
-        <div class="panel glass">
+        <!-- Quick link to Test Environment -->
+        <div class="panel glass" style="margin-bottom: 1.5rem;">
           <div class="panel-header">
             <div class="panel-title">
-              <i data-lucide="cpu"></i>
-              <h2>Simulación y Pruebas</h2>
+              <i data-lucide="flask-conical"></i>
+              <h2>Entorno de Pruebas</h2>
             </div>
           </div>
           <div class="panel-body">
-            <div class="simulator-controls">
-              <div class="form-group">
-                <label for="sim-user-id">Seleccionar Usuario para Simular Escaneo</label>
-                <div class="input-action-group">
-                  <select id="sim-user-id" class="form-input">
-                    <option value="">-- Cargar usuarios del sistema --</option>
-                  </select>
-                  <button id="btn-simulate-scan" class="btn btn-primary">
-                    <i data-lucide="play"></i> Simular Escaneo
-                  </button>
-                </div>
-              </div>
-
-              <div class="divider">ó probar hardware</div>
-
-              <div class="btn-group">
-                <button id="btn-test-open" class="btn btn-secondary">
-                  <i data-lucide="key-round"></i> Enviar Comando de Apertura (API)
-                </button>
-              </div>
-            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+              Las herramientas de simulación de escaneos, pruebas de apertura de torniquete y usuarios de prueba (1000, 1001, etc.) se gestionan en su espacio separado.
+            </p>
+            <a href="/pruebas" class="btn btn-secondary" style="width: 100%; justify-content: center; text-decoration: none;">
+              <i data-lucide="external-link"></i> Abrir Entorno de Pruebas (/pruebas)
+            </a>
           </div>
         </div>
 
