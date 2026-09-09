@@ -28,11 +28,15 @@
           <p>Servidor de Integración y Control Hikvision DS-K1T342MFWX-E1</p>
         </div>
       </div>
-      <div class="header-status" style="display: flex; align-items: center; gap: 1.25rem;">
+      <div class="header-status" style="display: flex; align-items: center; gap: 1rem;">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <span class="status-indicator online"></span>
           <span class="status-text">Backend Activo</span>
         </div>
+        <a href="/feedback.html" target="_blank" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Abrir pantalla de visualización para alumnos">
+          <i data-lucide="tv" style="width: 14px; height: 14px;"></i>
+          <span>Pantalla Feedback</span>
+        </a>
         <button id="btn-logout" class="btn btn-danger btn-sm" style="display: flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; background: rgba(255, 23, 68, 0.15); border: 1px solid rgba(255, 23, 68, 0.3); color: #ff5252;">
           <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
           <span>Cerrar Sesión</span>
@@ -301,30 +305,28 @@
     </section>
   <!-- QR Code Modal -->
   <div id="qr-modal" class="modal-overlay hidden">
-    <div class="modal-box" style="max-width: 350px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-        <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700;">Código QR de Acceso</h3>
+    <div class="modal-box" style="max-width: 360px; padding: 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Credencial de Acceso</h3>
         <button id="btn-close-qr-icon" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center;" title="Cerrar">
           <i data-lucide="x" style="width: 18px; height: 18px;"></i>
         </button>
       </div>
-      <div style="display: flex; flex-direction: column; align-items: center; gap: 1.25rem;">
-        <div style="background: white; padding: 1rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: flex; justify-content: center; align-items: center;">
-          <img id="qr-modal-image" src="" alt="Código QR" style="width: 180px; height: 180px; display: block; cursor: grab;" draggable="true" title="Arrastre la imagen a cualquier chat o ventana" />
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
+        <div style="width: 100%; display: flex; justify-content: center; align-items: center;">
+          <img id="qr-modal-image" src="" alt="Credencial de Acceso" style="width: 100%; max-width: 290px; height: auto; display: block; cursor: grab; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.6);" draggable="true" title="Arrastre la credencial a cualquier chat o ventana" />
         </div>
         <div style="text-align: center;">
-          <h4 id="qr-modal-user-info" style="margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 600; color: #ffffff;">Nombre del Alumno</h4>
-          <span id="qr-modal-user-id" style="font-family: monospace; font-size: 0.9rem; color: var(--accent-blue);">ID: 0000</span>
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.35rem;">(Puede arrastrar la imagen directamente o clic derecho para copiarla)</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">(Puede arrastrar la credencial directamente o clic derecho para copiarla)</div>
         </div>
         <div style="display: flex; flex-direction: column; gap: 0.5rem; width: 100%; margin-top: 0.25rem;">
-          <button type="button" id="btn-qr-download" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;" title="Descargar imagen del código QR">
+          <button type="button" id="btn-qr-download" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;" title="Descargar credencial del código QR">
             <i data-lucide="download" style="width: 16px; height: 16px;"></i> Guardar Imagen
           </button>
-          <button type="button" id="btn-qr-copy" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;" title="Copiar imagen al portapapeles">
+          <button type="button" id="btn-qr-copy" class="btn btn-secondary btn-sm" style="width: 100%; justify-content: center;" title="Copiar credencial al portapapeles">
             <i data-lucide="copy" style="width: 16px; height: 16px;"></i> Copiar Imagen
           </button>
-          <button type="button" id="btn-qr-share" class="btn btn-primary btn-sm" style="width: 100%; justify-content: center;" title="Compartir imagen del código QR">
+          <button type="button" id="btn-qr-share" class="btn btn-primary btn-sm" style="width: 100%; justify-content: center;" title="Compartir credencial del código QR">
             <i data-lucide="share-2" style="width: 16px; height: 16px;"></i> Compartir Imagen
           </button>
 

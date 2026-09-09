@@ -30,12 +30,33 @@ function logEvent(type, message) {
 function broadcastFeedback(authorized, name, userId, reason) {
   const feedbackObj = {
     type: 'access_feedback',
+    status: authorized ? 'authorized' : 'denied',
     authorized,
     name,
     userId,
-    reason
+    reason,
+    timestamp: new Date().toISOString()
   };
   const data = JSON.stringify(feedbackObj);
+  sseClients.forEach(client => {
+    client.write(`data: ${data}\n\n`);
+  });
+}
+
+/**
+ * Broadcasts a pending/verifying state to the dedicated feedback screens
+ * when the credential has been read and user identified, waiting for external API.
+ */
+function broadcastVerifying(name, userId, eventType) {
+  const verifyingObj = {
+    type: 'access_feedback',
+    status: 'verifying',
+    name,
+    userId,
+    eventType,
+    timestamp: new Date().toISOString()
+  };
+  const data = JSON.stringify(verifyingObj);
   sseClients.forEach(client => {
     client.write(`data: ${data}\n\n`);
   });
@@ -44,5 +65,6 @@ function broadcastFeedback(authorized, name, userId, reason) {
 module.exports = {
   logEvent,
   broadcastFeedback,
+  broadcastVerifying,
   sseClients
 };

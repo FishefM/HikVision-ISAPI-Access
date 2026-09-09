@@ -89,7 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
     source.onmessage = (event) => {
       try {
         const logData = JSON.parse(event.data);
-        appendConsoleLog(logData.type, logData.message, logData.timestamp.split(' ')[1]);
+        if (logData.type === 'access_feedback') return;
+        const timeStr = logData.timestamp ? (logData.timestamp.includes(' ') ? logData.timestamp.split(' ')[1] : logData.timestamp) : '';
+        appendConsoleLog(logData.type, logData.message, timeStr);
         
         // Refresh logs and statistics on any new activity
         refreshLogs();
@@ -647,6 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnShareEmail = document.getElementById('btn-share-email');
 
   let currentQrUser = null;
+  let currentQrBlob = null;
   let currentQrUrl = '';
 
   function downloadBlob(blob, filename) {
@@ -660,15 +663,177 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
   }
 
-  function showUserQR(user) {
+  function drawRoundedRect(ctx, x, y, width, height, radius) {
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, radius);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+  }
+
+  /**
+   * Genera la credencial digital completa con el diseno visual de la web:
+   * fondo oscuro degradado, resplandor, esquinas redondeadas, contenedor blanco de QR y datos del alumno.
+   */
+  async function generateCredentialCardBlob(user) {
+    const qrImg = new Image();
+    qrImg.crossOrigin = 'anonymous';
+    const qrSource = `/api/users/${user.id}/qr`;
+
+    await new Promise((resolve, reject) => {
+      qrImg.onload = () => resolve();
+      qrImg.onerror = () => reject(new Error('No se pudo cargar el codigo QR base.'));
+      qrImg.src = qrSource;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 520;
+    canvas.height = 680;
+    const ctx = canvas.getContext('2d');
+
+    const cardRadius = 24;
+
+    // Fondo con esquinas redondeadas
+    ctx.save();
+    drawRoundedRect(ctx, 0, 0, 520, 680, cardRadius);
+    ctx.clip();
+
+    // Fondo degradado oscuro con la paleta de la web
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, 680);
+    bgGrad.addColorStop(0, '#0f172a');
+    bgGrad.addColorStop(0.4, '#0a0f1d');
+    bgGrad.addColorStop(1, '#060913');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 520, 680);
+
+    // Resplandor superior sutil
+    const glowGrad = ctx.createRadialGradient(260, 0, 20, 260, 0, 280);
+    glowGrad.addColorStop(0, 'rgba(99, 102, 241, 0.28)');
+    glowGrad.addColorStop(1, 'rgba(99, 102, 241, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, 0, 520, 300);
+
+    // Insignia superior "CREDENCIAL DE ACCESO"
+    const pillW = 200;
+    const pillH = 28;
+    const pillX = (520 - pillW) / 2;
+    const pillY = 32;
+    drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 14);
+    ctx.fillStyle = 'rgba(99, 102, 241, 0.16)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(129, 140, 248, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#a5b4fc';
+    ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CREDENCIAL DE ACCESO', 260, pillY + pillH / 2);
+
+    // Titulo institucional secundario
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('SISTEMA DE CONTROL DE ACCESO', 260, 84);
+
+    // Contenedor blanco con esquinas redondeadas y sombra para el QR
+    const qrBoxSize = 330;
+    const qrBoxX = (520 - qrBoxSize) / 2;
+    const qrBoxY = 108;
+    const qrBoxRadius = 18;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetY = 8;
+    drawRoundedRect(ctx, qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, qrBoxRadius);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.restore();
+
+    // Dibujar el QR centrado dentro del contenedor blanco
+    const qrPadding = 18;
+    const qrInnerSize = qrBoxSize - qrPadding * 2;
+    ctx.drawImage(qrImg, qrBoxX + qrPadding, qrBoxY + qrPadding, qrInnerSize, qrInnerSize);
+
+    // Nombre del alumno
+    const studentName = (user.name || 'Alumno').trim();
+    let nameFontSize = 22;
+    if (studentName.length > 25) nameFontSize = 18;
+    if (studentName.length > 34) nameFontSize = 15;
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold ${nameFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(studentName, 260, 485);
+
+    // ID / Matricula del alumno (color cyan/azul de la web)
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 16px "Courier New", monospace, sans-serif';
+    ctx.fillText(`ID: ${user.user_id}`, 260, 518);
+
+    // Linea decorativa divisoria
+    ctx.beginPath();
+    ctx.moveTo(180, 550);
+    ctx.lineTo(340, 550);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Pie institucional
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('ACCESO VALIDO EN TORNIQUETE', 260, 580);
+
+    // Borde exterior sutil de la tarjeta
+    ctx.restore();
+    drawRoundedRect(ctx, 1, 1, 518, 678, cardRadius);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('No se pudo generar la credencial digital.'));
+      }, 'image/png', 1.0);
+    });
+  }
+
+  async function showUserQR(user) {
     currentQrUser = user;
-    currentQrUrl = `/api/users/${user.id}/qr`;
-    qrModalImage.crossOrigin = 'anonymous';
-    qrModalImage.src = currentQrUrl;
-    qrModalUserInfo.textContent = user.name;
-    qrModalUserId.textContent = `ID: ${user.user_id}`;
+    currentQrBlob = null;
     if (qrShareOptions) qrShareOptions.classList.add('hidden');
     qrModal.classList.remove('hidden');
+
+    if (qrModalUserInfo) qrModalUserInfo.textContent = user.name;
+    if (qrModalUserId) qrModalUserId.textContent = `ID: ${user.user_id}`;
+
+    try {
+      currentQrBlob = await generateCredentialCardBlob(user);
+      if (currentQrUrl && currentQrUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(currentQrUrl);
+      }
+      currentQrUrl = URL.createObjectURL(currentQrBlob);
+      qrModalImage.src = currentQrUrl;
+    } catch (err) {
+      console.warn('[QR] Error al generar credencial personalizada:', err);
+      currentQrUrl = `/api/users/${user.id}/qr`;
+      qrModalImage.src = currentQrUrl;
+    }
+
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -678,40 +843,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Helper para obtener el Blob PNG de la imagen del QR local (via fetch o canvas fallback)
+  // Helper para obtener el Blob PNG de la credencial completa
   async function getQrImageBlob() {
-    try {
-      const response = await fetch(currentQrUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        if (blob && blob.size > 0) {
-          return blob;
-        }
-      }
-    } catch (_) {}
-
-    return new Promise((resolve, reject) => {
-      try {
-        const canvas = document.createElement('canvas');
-        const width = qrModalImage.naturalWidth || 400;
-        const height = qrModalImage.naturalHeight || 400;
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(qrModalImage, 0, 0, width, height);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('No se pudo procesar la imagen del codigo QR.'));
-        }, 'image/png');
-      } catch (err) {
-        reject(err);
-      }
-    });
+    if (currentQrBlob) return currentQrBlob;
+    if (currentQrUser) {
+      currentQrBlob = await generateCredentialCardBlob(currentQrUser);
+      return currentQrBlob;
+    }
+    throw new Error('No hay credencial activa para generar.');
   }
 
-  // Opcion 1: Guardar imagen (Descarga local)
+  // Opcion 1: Guardar credencial (Descarga local en PNG)
   if (btnQrDownload) {
     btnQrDownload.addEventListener('click', async () => {
       if (!currentQrUser) return;
@@ -720,12 +862,12 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const blob = await getQrImageBlob();
         const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        const filename = `credencial_${safeName}_${currentQrUser.user_id}.png`;
         downloadBlob(blob, filename);
-        appendConsoleLog('info', `[QR] Imagen descargada: ${filename}`);
+        appendConsoleLog('info', `[QR] Credencial descargada: ${filename}`);
       } catch (err) {
-        appendConsoleLog('error', `[QR Error] Error al guardar imagen: ${err.message}`);
-        alert(`No se pudo guardar la imagen: ${err.message}`);
+        appendConsoleLog('error', `[QR Error] Error al guardar credencial: ${err.message}`);
+        alert(`No se pudo guardar la credencial: ${err.message}`);
       } finally {
         btnQrDownload.disabled = false;
         btnQrDownload.innerHTML = originalHtml;
@@ -734,7 +876,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Opcion 2: Copiar imagen al portapapeles
+  // Opcion 2: Copiar credencial al portapapeles
   if (btnQrCopy) {
     btnQrCopy.addEventListener('click', async () => {
       if (!currentQrUser) return;
@@ -742,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnQrCopy.disabled = true;
 
       const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+      const filename = `credencial_${safeName}_${currentQrUser.user_id}.png`;
 
       try {
         const blob = await getQrImageBlob();
@@ -752,8 +894,8 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             const item = new ClipboardItem({ 'image/png': blob });
             await navigator.clipboard.write([item]);
-            appendConsoleLog('success', `[QR] Imagen copiada al portapapeles para ${currentQrUser.name}.`);
-            btnQrCopy.innerHTML = '<i data-lucide="check" style="width: 16px; height: 16px;"></i> Imagen Copiada';
+            appendConsoleLog('success', `[QR] Credencial copiada al portapapeles para ${currentQrUser.name}.`);
+            btnQrCopy.innerHTML = '<i data-lucide="check" style="width: 16px; height: 16px;"></i> Credencial Copiada';
             if (window.lucide) window.lucide.createIcons();
             setTimeout(() => {
               btnQrCopy.disabled = false;
@@ -765,13 +907,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Si el navegador bloquea la copia binaria por ser HTTP no seguro:
-        // Descargamos la imagen localmente y avisamos al usuario
         downloadBlob(blob, filename);
-        appendConsoleLog('info', `[QR] Imagen descargada como ${filename}. En red HTTP puede hacer clic derecho en la imagen y seleccionar "Copiar imagen".`);
-        alert(`En este entorno de red HTTP el navegador no permite acceso directo al portapapeles por seguridad.\n\nSe ha descargado el archivo "${filename}" a su equipo.\nTambien puede hacer clic derecho directamente sobre la imagen y seleccionar "Copiar imagen".`);
+        appendConsoleLog('info', `[QR] Credencial descargada como ${filename}. En red HTTP puede hacer clic derecho en la imagen y seleccionar "Copiar imagen".`);
+        alert(`En este entorno de red HTTP el navegador no permite acceso directo al portapapeles por seguridad.\n\nSe ha descargado el archivo "${filename}" a su equipo.\nTambien puede hacer clic derecho directamente sobre la credencial y seleccionar "Copiar imagen".`);
       } catch (err) {
-        appendConsoleLog('error', `[QR Error] Error al procesar imagen: ${err.message}`);
-        alert(`No se pudo copiar la imagen: ${err.message}`);
+        appendConsoleLog('error', `[QR Error] Error al procesar credencial: ${err.message}`);
+        alert(`No se pudo copiar la credencial: ${err.message}`);
       } finally {
         btnQrCopy.disabled = false;
         btnQrCopy.innerHTML = originalHtml;
@@ -780,7 +921,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Opcion 3: Compartir imagen
+  // Opcion 3: Compartir credencial
   if (btnQrShare) {
     btnQrShare.addEventListener('click', async () => {
       if (!currentQrUser) return;
@@ -790,18 +931,18 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const blob = await getQrImageBlob();
         const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        const filename = `credencial_${safeName}_${currentQrUser.user_id}.png`;
         const file = new File([blob], filename, { type: 'image/png' });
 
-        // Si el navegador soporta Web Share API con archivos reales (moviles o navegadores compatibles)
+        // Si el navegador soporta Web Share API con archivos reales
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
             await navigator.share({
-              title: `Codigo QR - ${currentQrUser.name}`,
-              text: `Codigo QR de acceso para ${currentQrUser.name} (ID: ${currentQrUser.user_id})`,
+              title: `Credencial de Acceso - ${currentQrUser.name}`,
+              text: `Credencial digital de acceso para ${currentQrUser.name} (ID: ${currentQrUser.user_id})`,
               files: [file]
             });
-            appendConsoleLog('info', `[QR] Imagen compartida exitosamente para ${currentQrUser.name}.`);
+            appendConsoleLog('info', `[QR] Credencial compartida exitosamente para ${currentQrUser.name}.`);
             return;
           } catch (err) {
             if (err.name === 'AbortError') return;
@@ -809,8 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        // Si no soporta Web Share de archivos (ej. navegadores de escritorio en red local):
-        // 1. Intentamos copiar la imagen binaria al portapapeles si esta disponible
+        // Fallback en PC de escritorio sin Web Share de archivos:
         let clipboardCopied = false;
         if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
           try {
@@ -820,23 +960,21 @@ document.addEventListener('DOMContentLoaded', () => {
           } catch (_) {}
         }
 
-        // 2. Descargamos la imagen del QR de forma automatica
         downloadBlob(blob, filename);
 
-        // 3. Mostramos las opciones de envio (WhatsApp y Correo)
         if (qrShareOptions) {
           qrShareOptions.classList.remove('hidden');
           if (window.lucide) window.lucide.createIcons();
         }
 
-        appendConsoleLog('info', `[QR] Imagen preparada (${filename}) para compartir.`);
+        appendConsoleLog('info', `[QR] Credencial preparada (${filename}) para compartir.`);
         const msg = clipboardCopied
-          ? `Se ha copiado la imagen del codigo QR al portapapeles y se ha descargado "${filename}".\n\nPuede pegar con Ctrl+V directamente en WhatsApp Web o en su correo, o arrastrar la imagen desde esta ventana.`
-          : `Se ha descargado la imagen "${filename}".\n\nPuede arrastrar la imagen directamente al chat de WhatsApp Web o adjuntar el archivo descargado en su correo.`;
+          ? `Se ha copiado la credencial al portapapeles y se ha descargado "${filename}".\n\nPuede pegar con Ctrl+V directamente en WhatsApp Web o en su correo, o arrastrar la credencial desde esta ventana.`
+          : `Se ha descargado la credencial "${filename}".\n\nPuede arrastrar la credencial directamente al chat de WhatsApp Web o adjuntar el archivo descargado en su correo.`;
         alert(msg);
       } catch (err) {
-        appendConsoleLog('error', `[QR Error] Error al preparar imagen para compartir: ${err.message}`);
-        alert(`No se pudo preparar la imagen: ${err.message}`);
+        appendConsoleLog('error', `[QR Error] Error al preparar credencial para compartir: ${err.message}`);
+        alert(`No se pudo preparar la credencial: ${err.message}`);
       } finally {
         btnQrShare.disabled = false;
         btnQrShare.innerHTML = originalHtml;
@@ -852,7 +990,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const blob = await getQrImageBlob().catch(() => null);
         const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        const filename = `credencial_${safeName}_${currentQrUser.user_id}.png`;
 
         if (blob) {
           downloadBlob(blob, filename);
@@ -864,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        const text = `Codigo QR de acceso - ${currentQrUser.name} (ID: ${currentQrUser.user_id})`;
+        const text = `Credencial de acceso - ${currentQrUser.name} (ID: ${currentQrUser.user_id})`;
         const url = `https://web.whatsapp.com/send?text=${encodeURIComponent(text)}`;
         window.open(url, '_blank', 'noopener,noreferrer');
         appendConsoleLog('info', `[QR] Abriendo WhatsApp Web para ${currentQrUser.name}.`);
@@ -881,14 +1019,14 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const blob = await getQrImageBlob().catch(() => null);
         const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        const filename = `credencial_${safeName}_${currentQrUser.user_id}.png`;
 
         if (blob) {
           downloadBlob(blob, filename);
         }
 
-        const subject = `Codigo QR de acceso - ${currentQrUser.name}`;
-        const body = `Hola,\n\nSe adjunta el codigo QR de acceso:\n\nAlumno: ${currentQrUser.name}\nMatricula / ID: ${currentQrUser.user_id}\n\n(Archivo descargado para adjuntar: ${filename})\n\nSaludos.`;
+        const subject = `Credencial digital de acceso - ${currentQrUser.name}`;
+        const body = `Hola,\n\nSe adjunta la credencial digital de acceso:\n\nAlumno: ${currentQrUser.name}\nMatricula / ID: ${currentQrUser.user_id}\n\n(Archivo adjunto: ${filename})\n\nSaludos.`;
         const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         window.location.href = url;
         appendConsoleLog('info', `[QR] Abriendo cliente de correo para ${currentQrUser.name}...`);

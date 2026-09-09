@@ -3,7 +3,7 @@ const https = require('https');
 const axios = require('axios');
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
-const { logEvent, broadcastFeedback } = require('../utils/logger');
+const { logEvent, broadcastFeedback, broadcastVerifying } = require('../utils/logger');
 
 // Agentes HTTP con IPv4 forzada y sin sockets persistentes colgados
 const cleanHttpAgent = new http.Agent({ keepAlive: false, family: 4 });
@@ -166,12 +166,19 @@ async function executeAccessValidation(reqInfo, clientIp) {
 
   logEvent('success', `Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`);
 
+  // Notificar a la pantalla de feedback que la credencial fue leída y el alumno identificado,
+  // indicando que se está esperando la respuesta de la API externa
+  broadcastVerifying(user.name, user.user_id, eventType);
+
   // Query para la API externa del usuario
   logEvent('info', `Llamando a la API externa de validación...`);
   let authorized = false;
   let apiResponse = null;
 
   try {
+    if (!user.api_url) {
+      throw new Error('El usuario no tiene configurada una URL de API externa');
+    }
     const isLocalMock = user.api_url.includes('localhost') || user.api_url.includes('127.0.0.1');
     const apiParams = isLocalMock ? {
       userId: user.user_id,

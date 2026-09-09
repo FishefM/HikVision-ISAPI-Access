@@ -18,6 +18,7 @@
       --accent-red: #ff1744;
       
       --gradient-standby: radial-gradient(circle at center, #0b1437 0%, #050710 100%);
+      --gradient-verifying: linear-gradient(135deg, #091e3a 0%, #1e3a8a 50%, #0284c7 100%);
       --gradient-success: linear-gradient(135deg, #004d40 0%, #00e676 100%);
       --gradient-denied: linear-gradient(135deg, #b71c1c 0%, #ff1744 100%);
     }
@@ -53,6 +54,10 @@
       text-align: center;
       transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       background: var(--gradient-standby);
+    }
+
+    .screen.state-verifying {
+      background: var(--gradient-verifying);
     }
 
     .screen.state-success {
@@ -103,6 +108,19 @@
       color: var(--accent-blue);
     }
 
+    .state-verifying .icon-container {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(56, 189, 248, 0.7);
+      color: #38bdf8;
+      transform: scale(1.08);
+      box-shadow: 0 0 50px rgba(2, 132, 199, 0.65);
+      animation: pulse-verifying 1.5s infinite;
+    }
+
+    .state-verifying .icon-container i {
+      animation: spin-loader 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+
     .state-success .icon-container {
       background: rgba(255, 255, 255, 0.2);
       border-color: rgba(255, 255, 255, 0.4);
@@ -134,13 +152,27 @@
       margin: 0.5rem 0;
       text-shadow: 0 4px 10px rgba(0,0,0,0.3);
       line-height: 1.1;
+      word-break: break-word;
     }
 
     .sub-message {
-      font-size: 1.5rem;
+      font-size: clamp(1.1rem, 3.5vmin, 1.5rem);
       font-weight: 300;
-      color: rgba(255, 255, 255, 0.8);
+      color: rgba(255, 255, 255, 0.85);
       max-width: 600px;
+    }
+
+    .state-verifying .sub-message {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.5rem 1.25rem;
+      border-radius: 9999px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: #e0f2fe;
+      font-size: 1.15rem;
+      letter-spacing: 0.5px;
     }
 
     .reason-box {
@@ -167,6 +199,23 @@
       100% {
         box-shadow: 0 0 0 0 rgba(0, 210, 255, 0);
       }
+    }
+
+    @keyframes pulse-verifying {
+      0% {
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6);
+      }
+      70% {
+        box-shadow: 0 0 0 30px rgba(56, 189, 248, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+      }
+    }
+
+    @keyframes spin-loader {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
 
     @keyframes shake {
@@ -299,6 +348,26 @@
       osc.stop(audioCtx.currentTime + 0.1);
     }
 
+    // Play credential read acknowledgment beep
+    function playReadBeep() {
+      if (!audioCtx) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(750, now);
+        gainNode.gain.setValueAtTime(0.12, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } catch (err) {
+        console.warn('Audio read tone failed:', err);
+      }
+    }
+
     // Play access audio notes
     function playChime(success) {
       if (!audioCtx) return;
@@ -368,6 +437,31 @@
       lucide.createIcons();
     }
 
+    // Trigger Verifying / Pending State (Credential read, waiting for external API)
+    function showVerifying(name, userId) {
+      if (resetTimer) clearTimeout(resetTimer);
+
+      screenViewport.className = 'screen state-verifying';
+      stateIcon.setAttribute('data-lucide', 'loader-2');
+      statusTitle.textContent = 'Credencial Leída';
+      statusTitle.style.display = 'block';
+
+      userDisplay.textContent = name || '';
+      userDisplay.style.display = name ? 'block' : 'none';
+
+      subMessage.textContent = 'Esperando respuesta de la API...';
+      subMessage.style.display = 'inline-flex';
+
+      reasonContainer.style.display = 'none';
+      reasonContainer.textContent = '';
+
+      playReadBeep();
+      lucide.createIcons();
+
+      // En caso de retardo extremo o caida de la API externa, volver a standby tras 10s
+      resetTimer = setTimeout(resetToStandby, 10000);
+    }
+
     // Trigger visual states
     function showFeedback(authorized, name, userId, reason) {
       // Clear existing reset timer
@@ -416,7 +510,11 @@
           const data = JSON.parse(event.data);
           // Intercept access feedback events
           if (data.type === 'access_feedback') {
-            showFeedback(data.authorized, data.name, data.userId, data.reason);
+            if (data.status === 'verifying') {
+              showVerifying(data.name, data.userId);
+            } else {
+              showFeedback(data.authorized, data.name, data.userId, data.reason);
+            }
           }
         } catch (err) {
           console.error('Error parsing SSE event data:', err);
@@ -429,6 +527,11 @@
         setTimeout(connectSSE, 5000);
       };
     }
+
+    // Activar audio automáticamente en la primera interacción con la pantalla
+    document.body.addEventListener('click', () => {
+      if (!audioCtx) enableAudio();
+    }, { once: true });
 
     // Initialize
     lucide.createIcons();
