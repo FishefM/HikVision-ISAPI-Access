@@ -1,7 +1,17 @@
+const http = require('http');
+const https = require('https');
 const axios = require('axios');
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
 const { logEvent, broadcastFeedback } = require('../utils/logger');
+
+// Agentes HTTP con IPv4 forzada y sin sockets persistentes colgados
+const cleanHttpAgent = new http.Agent({ keepAlive: false, family: 4 });
+const cleanHttpsAgent = new https.Agent({ keepAlive: false, family: 4, rejectUnauthorized: false });
+
+// Control de concurrencia y rebotes múltiples del lector
+const inFlightRequests = new Map();
+const recentVerifications = new Map();
 
 /**
  * Extrae el user ID y el número de serie de la solicitud del dispositivo.
@@ -137,24 +147,11 @@ function extractDeviceRequestInfo(req) {
 
 /**
  * Controlador principal de verificacion
- * Solicitud de acceso, consulta a la base de datos, llama a la API externa del usuario, registra el resultado y envía retroalimentación al dispositivo.
- * @param {Object} reqInfo - Información extraída de la solicitud del dispositivo (userId, serialNo, eventType).
- * @param {string} clientIp - Dirección IP del dispositivo que envió la solicitud.
- * @returns {Object} - Resultado de la verificación (authorized, name, serialNo, doorOpened, reason).
+/**
+ * Ejecuta la llamada a la base de datos, API externa y apertura de puerta
  */
-async function processAccessRequest(reqInfo, clientIp) {
+async function executeAccessValidation(reqInfo, clientIp) {
   const { userId, serialNo, eventType } = reqInfo;
-
-  logEvent('info', `=== Nueva solicitud de acceso ===`);
-  logEvent('info', `Dispositivo IP: ${clientIp}`);
-  logEvent('info', `ID de Usuario extraído: ${userId || 'No encontrado'}`);
-  logEvent('info', `Event Serial No: ${serialNo}`);
-  logEvent('info', `Tipo de verificación: ${eventType}`);
-
-  if (!userId) {
-    logEvent('info', `Evento de hardware sin credencial (Serial: ${serialNo}). Omitiendo validación.`);
-    return { authorized: false, reason: 'No User ID found', serialNo };
-  }
 
   // Checar la base de datos local para el usuario
   logEvent('info', `Consultando base de datos para el usuario ID: ${userId}...`);
@@ -189,9 +186,11 @@ async function processAccessRequest(reqInfo, clientIp) {
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
+        'Connection': 'close'
       },
-      timeout: 10000 // 10 seconds timeout
+      httpAgent: cleanHttpAgent,
+      httpsAgent: cleanHttpsAgent,
+      timeout: 8000 // 8 segundos de timeout
     });
 
     apiResponse = apiResponseCall.data;
@@ -293,6 +292,83 @@ async function processAccessRequest(reqInfo, clientIp) {
   broadcastFeedback(authorized, user.name, userId, denyReason);
 
   return { authorized, name: user.name, serialNo, doorOpened, reason: denyReason };
+}
+
+/**
+ * Controlador principal de verificacion con proteccion contra rafagas concurrentes y rebotes
+ * @param {Object} reqInfo - Información extraída de la solicitud del dispositivo (userId, serialNo, eventType).
+ * @param {string} clientIp - Dirección IP del dispositivo que envió la solicitud.
+ * @returns {Object} - Resultado de la verificación (authorized, name, serialNo, doorOpened, reason).
+ */
+async function processAccessRequest(reqInfo, clientIp) {
+  const { userId, serialNo, eventType } = reqInfo;
+
+  logEvent('info', `=== Nueva solicitud de acceso ===`);
+  logEvent('info', `Dispositivo IP: ${clientIp}`);
+  logEvent('info', `ID de Usuario extraído: ${userId || 'No encontrado'}`);
+  logEvent('info', `Event Serial No: ${serialNo}`);
+  logEvent('info', `Tipo de verificación: ${eventType}`);
+
+  if (!userId) {
+    logEvent('info', `Evento de hardware sin credencial (Serial: ${serialNo}). Omitiendo validación.`);
+    return { authorized: false, reason: 'No User ID found', serialNo };
+  }
+
+  const cleanUserId = String(userId).trim();
+
+  // 1. Deduplicación concurrente: Si ya hay una validación ejecutándose en este mismo instante para este alumno,
+  // reutilizamos la misma promesa para no saturar la API externa ni generar bloqueos de concurrencia
+  if (inFlightRequests.has(cleanUserId)) {
+    logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`);
+    try {
+      const inFlightResult = await inFlightRequests.get(cleanUserId);
+      const settings = await dbHelper.getSettings();
+      if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
+        deviceHelper.sendRemoteCheck(
+          settings.device_ip,
+          settings.device_port,
+          settings.device_user,
+          settings.device_password,
+          serialNo,
+          inFlightResult.authorized
+        ).catch(() => {});
+      }
+      return { ...inFlightResult, serialNo };
+    } catch (_) {}
+  }
+
+  // 2. Cooldown anti-rebote: Si ya se validó este alumno hace menos de 2.5 segundos,
+  // devolvemos el mismo resultado sin volver a disparar la API externa ni cambiar el estado en el torniquete
+  if (recentVerifications.has(cleanUserId)) {
+    const recent = recentVerifications.get(cleanUserId);
+    if (Date.now() - recent.timestamp < 2500) {
+      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: ${recent.result.authorized ? 'Autorizado' : 'Denegado'}`);
+      const settings = await dbHelper.getSettings();
+      if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
+        deviceHelper.sendRemoteCheck(
+          settings.device_ip,
+          settings.device_port,
+          settings.device_user,
+          settings.device_password,
+          serialNo,
+          recent.result.authorized
+        ).catch(() => {});
+      }
+      return { ...recent.result, serialNo };
+    }
+  }
+
+  // 3. Ejecutar validación y almacenar promesa en vuelo
+  const validationPromise = executeAccessValidation(reqInfo, clientIp);
+  inFlightRequests.set(cleanUserId, validationPromise);
+
+  try {
+    const result = await validationPromise;
+    recentVerifications.set(cleanUserId, { result, timestamp: Date.now() });
+    return result;
+  } finally {
+    inFlightRequests.delete(cleanUserId);
+  }
 }
 
 /**
