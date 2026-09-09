@@ -30,6 +30,22 @@ function configureBodyParsers(app) {
         // Intentar parsear automáticamente si es JSON o XML
         if (contentType.includes('application/json')) {
           try { req.body = JSON.parse(req.rawBody); } catch (e) {}
+        } else if (isMultipart) {
+          // Extraer payload JSON dentro del multipart boundary de Hikvision
+          const jsonMatch = req.rawBody.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try { req.body = JSON.parse(jsonMatch[0]); } catch (e) {}
+          }
+          if (!req.body) {
+            const xmlMatch = req.rawBody.match(/<([A-Za-z0-9_]+)[\s\S]*<\/\1>/);
+            if (xmlMatch) {
+              xml2js.parseString(xmlMatch[0], { explicitArray: false, mergeAttrs: true }, (err, result) => {
+                if (!err && result) req.body = result;
+                next();
+              });
+              return;
+            }
+          }
         } else if (contentType.includes('/xml') || contentType.includes('+xml') || req.rawBody.trim().startsWith('<')) {
           xml2js.parseString(req.rawBody, { explicitArray: false, mergeAttrs: true }, (err, result) => {
             if (!err && result) req.body = result;

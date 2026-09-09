@@ -15,12 +15,16 @@ function extractDeviceRequestInfo(req) {
   let eventType = 'unknown';
   let isHeartbeat = false;
 
-  // Imprimir resumen del cuerpo recibido para facilitar depuración
+  // Imprimir cuerpo recibido completo para depuracion
   if (req.rawBody) {
-    const preview = req.rawBody.length > 300 ? req.rawBody.substring(0, 300) + '... [TRUNCATED]' : req.rawBody;
+    const preview = req.rawBody.length > 3000 ? req.rawBody.substring(0, 3000) + '... [TRUNCATED]' : req.rawBody;
     console.log(`[DEBUG Request Hikvision (${req.headers['content-type'] || 'sin content-type'})]:\n${preview}`);
   } else {
-    console.log(`[DEBUG Request Hikvision]: Cuerpo vacío o no capturado. Content-Type: ${req.headers['content-type']}`);
+    console.log(`[DEBUG Request Hikvision]: Cuerpo vacio o no capturado. Content-Type: ${req.headers['content-type']}`);
+  }
+
+  if (req.body && !isHeartbeat) {
+    console.log(`[DEBUG Parsed JSON/XML Body]:\n${JSON.stringify(req.body, null, 2)}`);
   }
 
   // Detecta si la solicitud es un latido (heartbeat)
