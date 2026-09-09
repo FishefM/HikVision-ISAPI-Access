@@ -196,7 +196,7 @@ El sistema cuenta con dos visualizaciones web diseñadas en HSL oscuro (Glassmor
 *   **Métricas de Acceso**: Tarjetas procesadas hoy, accesos exitosos y accesos denegados, actualizándose al instante.
 *   **Consola en Vivo**: Transmisión de depuración en tiempo real del backend usando un log de color (azul para información, verde para éxitos, rojo para errores).
 *   **Directorio de Usuarios (Alumnos)**: Panel CRUD para registrar nuevos alumnos y asignarles su endpoint API individual.
-*   **Código QR de Usuario**: Cada fila de la tabla de usuarios posee un botón con icono QR. Al hacer clic, despliega un modal centrado con el código QR del ID del usuario (generado usando la API pública `api.qrserver.com`), su nombre y un botón de cierre fácil.
+*   **Código QR de Usuario**: Cada fila de la tabla de usuarios posee un botón con icono QR. Al hacer clic, despliega un modal centrado con el código QR del ID del usuario generado localmente en el backend, su nombre y opciones para guardar la imagen, copiarla al portapapeles o compartir el archivo de imagen directamente (por WhatsApp o correo).
 *   **Configuración del Dispositivo**: Ajustes de red del torniquete y la opción de modificar la contraseña de administración del panel.
 *   **Historial de Accesos Recientes (Full-Width)**: Tabla de ancho completo al pie del panel que muestra de forma cómoda las columnas críticas (*Fecha/Hora, Usuario, Tipo, API URL y Respuesta*).
 

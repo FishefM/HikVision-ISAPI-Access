@@ -1,18 +1,7 @@
-const fs = require('fs');
-const path = require('path');
+const QRCode = require('qrcode');
 const dbHelper = require('../config/database');
 const { logEvent } = require('../utils/logger');
 const deviceHelper = require('../utils/device');
-
-// Directorio para almacenar localmente las fotos de rostro optimizadas
-const facesDir = path.join(__dirname, '..', 'uploads', 'faces');
-if (!fs.existsSync(facesDir)) {
-  try {
-    fs.mkdirSync(facesDir, { recursive: true });
-  } catch (err) {
-    console.warn('[Storage] No se pudo crear directorio uploads/faces:', err.message);
-  }
-}
 
 //-----------------------------------
 //----------CRUD Usuarios------------
@@ -76,60 +65,17 @@ async function addUser(req, res) {
     }
   }
 
-// Helper para leer dimensiones de un buffer JPEG (SOF0/SOF1/SOF2)
-function getJpegDimensions(buffer) {
-  if (!buffer || buffer.length < 4 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) return null;
-  let offset = 2;
-  while (offset < buffer.length - 8) {
-    if (buffer[offset] !== 0xFF) { offset++; continue; }
-    const marker = buffer[offset + 1];
-    if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
-      return {
-        height: buffer.readUInt16BE(offset + 5),
-        width: buffer.readUInt16BE(offset + 7)
-      };
-    }
-    const len = buffer.readUInt16BE(offset + 2);
-    offset += 2 + len;
-  }
-  return null;
-}
-
-  // Guardar copia local de la fotografía si se adjuntó
-  let imageBuffer = (req.file && req.file.buffer) ? req.file.buffer : null;
-  if (imageBuffer) {
-    const dims = getJpegDimensions(imageBuffer);
-    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
-    logEvent('info', `[MinMoe Foto] Fotografía recibida para "${name}": ${req.file.originalname} (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
-    if (dims && dims.width !== dims.height) {
-      logEvent('warning', `[MinMoe Foto ADVERTENCIA] La foto no es cuadrada (${dimText}). Se recomienda formato 1:1 (600x600 px) para correcta visualización en MinMoe.`);
-    } else if (dims) {
-      logEvent('info', `[MinMoe Foto OK] Formato cuadrado 1:1 verificado (${dimText}).`);
-    }
-    try {
-      const localFacePath = path.join(facesDir, `${user_id}.jpg`);
-      fs.writeFileSync(localFacePath, imageBuffer);
-      logEvent('info', `[Almacenamiento Local] Fotografía respaldada en disco (${user_id}.jpg).`);
-    } catch (fsErr) {
-      console.warn('[Almacenamiento Local] No se pudo guardar la fotografía en disco:', fsErr.message);
-    }
-  } else {
-    logEvent('info', `[MinMoe Foto] No se adjuntó fotografía para el alumno "${name}".`);
-  }
-
   // Paso 2: Sincronización con el hardware Hikvision MinMoe
-  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, faceSuccess: null, diagnostics: [] };
+  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [] };
   try {
     const settings = await dbHelper.getSettings();
     if (settings.device_ip && settings.device_user && settings.device_password) {
       logEvent('info', `[MinMoe] Iniciando sincronización de "${name}" (${user_id}) con biométrico en ${settings.device_ip}:${settings.device_port || 80}...`);
       
-      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, user, imageBuffer);
+      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, user);
 
       if (deviceSyncResult.synced) {
-        logEvent('success', `[MinMoe OK] Alumno "${name}" sincronizado con éxito en el biométrico (Usuario, Tarjeta y Rostro).`);
-      } else if (deviceSyncResult.userSuccess && deviceSyncResult.faceSuccess === false) {
-        logEvent('warning', `[MinMoe ADVERTENCIA] Alumno "${name}" creado en MinMoe pero falló su fotografía: ${deviceSyncResult.summary}`);
+        logEvent('success', `[MinMoe OK] Alumno "${name}" sincronizado con éxito en el biométrico (Usuario y Tarjeta).`);
       } else {
         logEvent('warning', `[MinMoe ADVERTENCIA] Guardado en SQLite pero MinMoe reportó: ${deviceSyncResult.summary}`);
       }
@@ -147,7 +93,6 @@ function getJpegDimensions(buffer) {
       synced: false,
       userSuccess: false,
       cardSuccess: false,
-      faceSuccess: false,
       diagnostics: [`Excepción de red: ${syncErr.message}`],
       summary: syncErr.message
     };
@@ -160,7 +105,6 @@ function getJpegDimensions(buffer) {
     synced: deviceSyncResult.synced,
     userSuccess: deviceSyncResult.userSuccess,
     cardSuccess: deviceSyncResult.cardSuccess,
-    faceSuccess: deviceSyncResult.faceSuccess,
     syncSummary: deviceSyncResult.summary,
     diagnostics: deviceSyncResult.diagnostics
   });
@@ -195,46 +139,17 @@ async function updateUser(req, res) {
     return res.status(500).json({ error: `Error de base de datos al actualizar: ${dbErr.message}` });
   }
 
-  // Comprobar fotografía nueva o preexistente en disco
-  let imageBuffer = (req.file && req.file.buffer) ? req.file.buffer : null;
-  const localFacePath = path.join(facesDir, `${user_id}.jpg`);
-  if (imageBuffer) {
-    const dims = getJpegDimensions(imageBuffer);
-    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
-    logEvent('info', `[MinMoe Foto] Nueva fotografía recibida para "${name}" (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
-    if (dims && dims.width !== dims.height) {
-      logEvent('warning', `[MinMoe Foto ADVERTENCIA] La foto no es cuadrada (${dimText}). Se recomienda formato 1:1 (600x600 px) para correcta visualización en MinMoe.`);
-    } else if (dims) {
-      logEvent('info', `[MinMoe Foto OK] Formato cuadrado 1:1 verificado (${dimText}).`);
-    }
-    try {
-      fs.writeFileSync(localFacePath, imageBuffer);
-      logEvent('info', `[Almacenamiento Local] Fotografía actualizada en disco (${user_id}.jpg).`);
-    } catch (fsErr) {
-      console.warn('[Almacenamiento Local] Error al guardar foto:', fsErr.message);
-    }
-  } else if (fs.existsSync(localFacePath)) {
-    try {
-      imageBuffer = fs.readFileSync(localFacePath);
-      const dims = getJpegDimensions(imageBuffer);
-      const dimText = dims ? `, ${dims.width}x${dims.height} px` : '';
-      logEvent('info', `[MinMoe Foto] Utilizando fotografía existente en disco para "${name}" (${Math.round(imageBuffer.length / 1024)} KB${dimText}).`);
-    } catch (_) {}
-  }
-
   // Paso 2: Sincronizar con el hardware MinMoe
-  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, faceSuccess: null, diagnostics: [] };
+  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [] };
   try {
     const settings = await dbHelper.getSettings();
     if (settings.device_ip && settings.device_user && settings.device_password) {
       logEvent('info', `[MinMoe] Actualizando datos de "${name}" (${user_id}) en el biométrico...`);
 
-      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, { user_id, name }, imageBuffer);
+      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, { user_id, name });
 
       if (deviceSyncResult.synced) {
-        logEvent('success', `[MinMoe OK] Alumno "${name}" actualizado con éxito en el biométrico (Usuario, Tarjeta y Rostro).`);
-      } else if (deviceSyncResult.userSuccess && deviceSyncResult.faceSuccess === false) {
-        logEvent('warning', `[MinMoe ADVERTENCIA] Usuario "${name}" actualizado en MinMoe, pero falló la fotografía: ${deviceSyncResult.summary}`);
+        logEvent('success', `[MinMoe OK] Alumno "${name}" actualizado con éxito en el biométrico (Usuario y Tarjeta).`);
       } else {
         logEvent('warning', `[MinMoe ADVERTENCIA] Actualizado en SQLite pero MinMoe reportó: ${deviceSyncResult.summary}`);
       }
@@ -249,7 +164,6 @@ async function updateUser(req, res) {
       synced: false,
       userSuccess: false,
       cardSuccess: false,
-      faceSuccess: false,
       diagnostics: [`Error de red: ${syncErr.message}`],
       summary: syncErr.message
     };
@@ -261,7 +175,6 @@ async function updateUser(req, res) {
     synced: deviceSyncResult.synced,
     userSuccess: deviceSyncResult.userSuccess,
     cardSuccess: deviceSyncResult.cardSuccess,
-    faceSuccess: deviceSyncResult.faceSuccess,
     syncSummary: deviceSyncResult.summary,
     diagnostics: deviceSyncResult.diagnostics
   });
@@ -321,17 +234,6 @@ async function deleteUser(req, res) {
     await dbHelper.deleteUser(id);
     logEvent('info', `[DB OK] Alumno "${targetUser.name}" (ID registro: ${id}) eliminado de SQLite local.`);
 
-    // Paso 3: Eliminar archivo de foto local si existía
-    if (targetUser.user_id) {
-      const localFacePath = path.join(facesDir, `${targetUser.user_id}.jpg`);
-      if (fs.existsSync(localFacePath)) {
-        try {
-          fs.unlinkSync(localFacePath);
-          logEvent('info', `[Almacenamiento Local] Fotografía en disco eliminada para ID: ${targetUser.user_id}`);
-        } catch (_) {}
-      }
-    }
-
     res.json({
       success: true,
       deviceDeleted: deviceResult.success,
@@ -345,8 +247,7 @@ async function deleteUser(req, res) {
 }
 
 /**
- * Sincroniza TODOS los alumnos existentes en la base de datos hacia el dispositivo MinMoe,
- * cargando automáticamente sus fotografías de rostro si existen en disco.
+ * Sincroniza TODOS los alumnos existentes en la base de datos hacia el dispositivo MinMoe
  */
 async function syncAllUsers(req, res) {
   logEvent('info', '=== INICIANDO SINCRONIZACIÓN DE TODOS LOS ALUMNOS AL MINMOE ===');
@@ -375,17 +276,7 @@ async function syncAllUsers(req, res) {
       const u = users[i];
       logEvent('info', `[${i + 1}/${users.length}] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
 
-      // Verificar si hay foto en disco para este alumno
-      let imageBuffer = null;
-      const localFacePath = path.join(facesDir, `${u.user_id}.jpg`);
-      if (fs.existsSync(localFacePath)) {
-        try {
-          imageBuffer = fs.readFileSync(localFacePath);
-          logEvent('info', `  └─ Incluyendo fotografía guardada (${Math.round(imageBuffer.length / 1024)} KB)...`);
-        } catch (_) {}
-      }
-
-      const syncRes = await deviceHelper.syncFullUserToDevice(settings, u, imageBuffer);
+      const syncRes = await deviceHelper.syncFullUserToDevice(settings, u);
       if (syncRes.synced) {
         syncedCount++;
         logEvent('success', `  [OK] ${u.name} sincronizado correctamente.`);
@@ -398,7 +289,6 @@ async function syncAllUsers(req, res) {
         user_id: u.user_id,
         name: u.name,
         synced: syncRes.synced,
-        faceSuccess: syncRes.faceSuccess,
         diagnostics: syncRes.diagnostics
       });
     }
@@ -421,7 +311,7 @@ async function syncAllUsers(req, res) {
 }
 
 /**
- * Sincroniza un único alumno existente hacia el dispositivo MinMoe, incluyendo su foto si existe
+ * Sincroniza un único alumno existente hacia el dispositivo MinMoe
  */
 async function syncSingleUser(req, res) {
   const id = req.params.id;
@@ -438,21 +328,11 @@ async function syncSingleUser(req, res) {
       return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
     }
 
-    // Verificar si hay foto en disco para este alumno
-    let imageBuffer = null;
-    const localFacePath = path.join(facesDir, `${user.user_id}.jpg`);
-    if (fs.existsSync(localFacePath)) {
-      try {
-        imageBuffer = fs.readFileSync(localFacePath);
-        logEvent('info', `[MinMoe Foto] Cargando fotografía de disco para ${user.name} (${Math.round(imageBuffer.length / 1024)} KB)...`);
-      } catch (_) {}
-    }
-
     logEvent('info', `[MinMoe] Sincronizando alumno individual: ${user.name} (ID: ${user.user_id})...`);
-    const syncRes = await deviceHelper.syncFullUserToDevice(settings, user, imageBuffer);
+    const syncRes = await deviceHelper.syncFullUserToDevice(settings, user);
 
     if (syncRes.synced) {
-      logEvent('success', `[MinMoe OK] ${user.name} sincronizado con éxito (Usuario, Tarjeta y Rostro).`);
+      logEvent('success', `[MinMoe OK] ${user.name} sincronizado con éxito (Usuario y Tarjeta).`);
     } else {
       logEvent('warning', `[MinMoe ADVERTENCIA] ${user.name}: ${syncRes.summary}`);
     }
@@ -460,7 +340,6 @@ async function syncSingleUser(req, res) {
     res.json({
       success: syncRes.synced,
       user,
-      faceSuccess: syncRes.faceSuccess,
       diagnostics: syncRes.diagnostics,
       summary: syncRes.summary
     });
@@ -471,9 +350,9 @@ async function syncSingleUser(req, res) {
 }
 
 /**
- * Obtiene la fotografía guardada de un alumno en disco si existe
+ * Genera y sirve el código QR de acceso para un alumno en formato imagen PNG
  */
-async function getUserPhoto(req, res) {
+async function getUserQR(req, res) {
   const id = req.params.id;
   try {
     const users = await dbHelper.getUsers();
@@ -481,83 +360,26 @@ async function getUserPhoto(req, res) {
     if (!user) {
       return res.status(404).json({ error: 'Alumno no encontrado.' });
     }
-    const localFacePath = path.join(facesDir, `${user.user_id}.jpg`);
-    if (fs.existsSync(localFacePath)) {
-      res.setHeader('Content-Type', 'image/jpeg');
-      return res.sendFile(localFacePath);
-    }
-    return res.status(404).json({ error: 'No hay fotografía registrada para este alumno.' });
+
+    const qrBuffer = await QRCode.toBuffer(String(user.user_id), {
+      type: 'png',
+      width: 400,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
+
+    const safeName = user.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `inline; filename="qr_${safeName}_${user.user_id}.png"`);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(qrBuffer);
   } catch (err) {
+    logEvent('error', `[QR ERROR] Error al generar código QR: ${err.message}`);
     return res.status(500).json({ error: err.message });
-  }
-}
-
-/**
- * Dispara la captura facial remota en la cámara física del MinMoe
- */
-async function captureFace(req, res) {
-  try {
-    const settings = await dbHelper.getSettings();
-    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
-      return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
-    }
-
-    logEvent('info', '[MinMoe Captura] Iniciando captura facial remota... Mire a la cámara del biométrico.');
-    const imageBuffer = await deviceHelper.captureFaceFromDevice(settings);
-
-    const dims = getJpegDimensions(imageBuffer);
-    const dimText = dims ? `${dims.width}x${dims.height} px` : 'dim. desconocidas';
-    logEvent('success', `[MinMoe Captura OK] Rostro capturado exitosamente por el biométrico (${Math.round(imageBuffer.length / 1024)} KB, ${dimText}).`);
-
-    const base64Data = imageBuffer.toString('base64');
-    res.json({
-      success: true,
-      imageBufferBase64: `data:image/jpeg;base64,${base64Data}`,
-      sizeKB: Math.round(imageBuffer.length / 1024),
-      dimensions: dims
-    });
-  } catch (err) {
-    logEvent('error', `[MinMoe Captura ERROR] Falló la captura remota: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
-}
-
-/**
- * Consulta y descarga la foto ya registrada físicamente en el MinMoe para sincronizarla en local
- */
-async function importFaceFromDevice(req, res) {
-  const id = req.params.id;
-  try {
-    const users = await dbHelper.getUsers();
-    const user = users.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
-    if (!user) {
-      return res.status(404).json({ error: 'Alumno no encontrado.' });
-    }
-
-    const settings = await dbHelper.getSettings();
-    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
-      return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
-    }
-
-    logEvent('info', `[MinMoe] Importando fotografía desde el biométrico para ${user.name} (${user.user_id})...`);
-    const imageBuffer = await deviceHelper.fetchFaceFromDevice(settings, user.user_id);
-
-    const localFacePath = path.join(facesDir, `${user.user_id}.jpg`);
-    fs.writeFileSync(localFacePath, imageBuffer);
-
-    const dims = getJpegDimensions(imageBuffer);
-    const dimText = dims ? `${dims.width}x${dims.height} px` : '';
-    logEvent('success', `[MinMoe OK] Fotografía importada y guardada localmente (${Math.round(imageBuffer.length / 1024)} KB${dimText ? ', ' + dimText : ''}).`);
-
-    res.json({
-      success: true,
-      user_id: user.user_id,
-      sizeKB: Math.round(imageBuffer.length / 1024),
-      dimensions: dims
-    });
-  } catch (err) {
-    logEvent('error', `[MinMoe ERROR] Error al importar fotografía: ${err.message}`);
-    res.status(500).json({ error: err.message });
   }
 }
 
@@ -568,7 +390,5 @@ module.exports = {
   deleteUser,
   syncAllUsers,
   syncSingleUser,
-  getUserPhoto,
-  captureFace,
-  importFaceFromDevice
+  getUserQR
 };

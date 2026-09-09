@@ -44,10 +44,24 @@ function extractDeviceRequestInfo(req) {
       }
       
       if (!isHeartbeat) {
-        userId = root.employeeNoString || root.cardNo || root.userId || root.userNo || root.employeeNo;
+        userId = root.employeeNoString || 
+                 root.cardNo || 
+                 root.QRCode || 
+                 root.qrCode || 
+                 root.qrCodeContent || 
+                 root.barcode || 
+                 root.barCode || 
+                 root.codeContent || 
+                 root.userId || 
+                 root.userNo || 
+                 root.employeeNo;
         if (root.serialNo) serialNo = String(root.serialNo);
         if (root.currentVerifyMode) eventType = root.currentVerifyMode;
         else if (root.eventType) eventType = root.eventType;
+        if (!eventType || eventType === 'unknown') {
+          if (root.QRCode || root.qrCode || root.qrCodeContent) eventType = 'qrCode';
+          else if (root.barcode || root.barCode) eventType = 'barcode';
+        }
       }
     }
   }
@@ -73,7 +87,27 @@ function extractDeviceRequestInfo(req) {
                           req.rawBody.match(/"cardNo"\s*:\s*["']?([^"',\s}]+)["']?/i);
       if (cardNoMatch && cardNoMatch[1]) {
         userId = cardNoMatch[1].trim();
-        eventType = 'card';
+        if (eventType === 'unknown') eventType = 'card';
+      }
+    }
+
+    // 3. Extraer campos de QR / Código de barras (QRCode, qrCode, barcode, etc.)
+    if (!userId) {
+      const qrMatch = req.rawBody.match(/<QRCode[^>]*>([^<]+)<\/QRCode>/i) ||
+                      req.rawBody.match(/"QRCode"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                      req.rawBody.match(/<qrCode[^>]*>([^<]+)<\/qrCode>/i) ||
+                      req.rawBody.match(/"qrCode"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                      req.rawBody.match(/<qrCodeContent[^>]*>([^<]+)<\/qrCodeContent>/i) ||
+                      req.rawBody.match(/"qrCodeContent"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                      req.rawBody.match(/<codeContent[^>]*>([^<]+)<\/codeContent>/i) ||
+                      req.rawBody.match(/"codeContent"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                      req.rawBody.match(/<barcode[^>]*>([^<]+)<\/barcode>/i) ||
+                      req.rawBody.match(/"barcode"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                      req.rawBody.match(/<barCode[^>]*>([^<]+)<\/barCode>/i) ||
+                      req.rawBody.match(/"barCode"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (qrMatch && qrMatch[1]) {
+        userId = qrMatch[1].trim();
+        if (eventType === 'unknown') eventType = 'qrCode';
       }
     }
 

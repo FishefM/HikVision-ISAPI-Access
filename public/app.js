@@ -368,43 +368,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Form Actions & Modals
   // ==========================================================================
-  let capturedFaceBlob = null;
-
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
-    const previewContainer = document.getElementById('face-preview-container');
-    const previewImg = document.getElementById('face-preview-img');
-    const previewInfo = document.getElementById('face-preview-info');
-    const btnDeviceImportFace = document.getElementById('btn-device-import-face');
-    capturedFaceBlob = null;
-    
     if (user) {
       userFormTitle.textContent = 'Editar Usuario';
       userDbIdInput.value = user.id;
       userIdInput.value = user.user_id;
       userNameInput.value = user.name;
       userApiUrlInput.value = user.api_url;
-      if (btnDeviceImportFace) btnDeviceImportFace.classList.remove('hidden');
-
-      // Cargar vista previa de fotografía existente en el sistema si la tiene
-      if (previewContainer && previewImg && previewInfo) {
-        previewImg.src = `${API_USERS}/${user.id}/photo?t=${Date.now()}`;
-        previewImg.onload = () => {
-          previewInfo.textContent = 'Fotografía guardada en el sistema (MinMoe / Local)';
-          previewContainer.classList.remove('hidden');
-        };
-        previewImg.onerror = () => {
-          previewContainer.classList.add('hidden');
-          previewImg.src = '';
-        };
-      }
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Usuario';
       userForm.reset();
       userDbIdInput.value = '';
-      if (btnDeviceImportFace) btnDeviceImportFace.classList.add('hidden');
-      if (previewContainer) previewContainer.classList.add('hidden');
-      if (previewImg) previewImg.src = '';
     }
   }
 
@@ -412,195 +387,6 @@ document.addEventListener('DOMContentLoaded', () => {
     userFormContainer.classList.add('hidden');
     userForm.reset();
     userDbIdInput.value = '';
-    capturedFaceBlob = null;
-    const btnDeviceImportFace = document.getElementById('btn-device-import-face');
-    if (btnDeviceImportFace) btnDeviceImportFace.classList.add('hidden');
-    const previewContainer = document.getElementById('face-preview-container');
-    const previewImg = document.getElementById('face-preview-img');
-    if (previewContainer) previewContainer.classList.add('hidden');
-    if (previewImg) previewImg.src = '';
-  }
-
-  // Helper para recortar a cuadrado 1:1, redimensionar a 600x600 px y comprimir a JPEG < 180KB para Hikvision MinMoe
-  async function optimizeFaceImage(file, maxSizeKB = 180, targetDim = 600) {
-    if (!file) return null;
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          // Hikvision MinMoe requiere estrictamente una imagen cuadrada (relacion de aspecto 1:1).
-          // Recortamos proporcionalmente centrado (square crop) para evitar cualquier distorsion en el rostro.
-          const sDim = Math.min(img.width, img.height);
-          let sx = 0;
-          let sy = 0;
-
-          if (img.width > img.height) {
-            // Paisaje (horizontal): centrado horizontal
-            sx = Math.round((img.width - sDim) / 2);
-            sy = 0;
-          } else if (img.height > img.width) {
-            // Retrato (vertical): en fotos de carnet/identificacion el rostro suele ubicarse en la parte superior-media.
-            // Usamos un desplazamiento del 25% del excedente superior para encuadrar frente, ojos y hombros.
-            sy = Math.round((img.height - sDim) * 0.25);
-            sx = 0;
-          }
-
-          const canvas = document.createElement('canvas');
-          canvas.width = targetDim;
-          canvas.height = targetDim;
-          const ctx = canvas.getContext('2d');
-
-          // Rellenar con fondo blanco solido para evitar transparencias o fondos oscuros
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, targetDim, targetDim);
-
-          // Dibujar el recorte cuadrado proporcionalmente en el lienzo cuadrado de targetDim x targetDim
-          ctx.drawImage(img, sx, sy, sDim, sDim, 0, 0, targetDim, targetDim);
-
-          let quality = 0.85;
-          function attemptCompress() {
-            canvas.toBlob((blob) => {
-              if (!blob) return reject(new Error('No se pudo procesar la imagen seleccionada.'));
-              if (blob.size <= maxSizeKB * 1024 || quality <= 0.3) {
-                const optimizedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
-                  type: 'image/jpeg',
-                  lastModified: Date.now()
-                });
-                resolve(optimizedFile);
-              } else {
-                quality -= 0.15;
-                attemptCompress();
-              }
-            }, 'image/jpeg', quality);
-          }
-          attemptCompress();
-        };
-        img.onerror = () => reject(new Error('El archivo seleccionado no es una imagen válida.'));
-        img.src = e.target.result;
-      };
-      reader.onerror = () => reject(new Error('Error al leer el archivo de fotografía.'));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  // Vista previa de fotografia en el formulario
-  const faceInputEl = document.getElementById('user-face-image');
-  if (faceInputEl) {
-    faceInputEl.addEventListener('change', async () => {
-      const previewContainer = document.getElementById('face-preview-container');
-      const previewImg = document.getElementById('face-preview-img');
-      const previewInfo = document.getElementById('face-preview-info');
-
-      if (faceInputEl.files && faceInputEl.files[0]) {
-        try {
-          const opt = await optimizeFaceImage(faceInputEl.files[0]);
-          if (previewImg && previewContainer && previewInfo) {
-            previewImg.src = URL.createObjectURL(opt);
-            previewInfo.textContent = `Cuadrada 1:1 (600x600 px) - ${Math.round(opt.size / 1024)} KB (JPEG sRGB)`;
-            previewContainer.classList.remove('hidden');
-          }
-        } catch (_) {}
-      } else if (previewContainer) {
-        previewContainer.classList.add('hidden');
-      }
-    });
-  }
-
-  // Botón para capturar foto directamente con la cámara del MinMoe
-  const btnDeviceCaptureFace = document.getElementById('btn-device-capture-face');
-  if (btnDeviceCaptureFace) {
-    btnDeviceCaptureFace.addEventListener('click', async () => {
-      const originalText = btnDeviceCaptureFace.innerHTML;
-      btnDeviceCaptureFace.disabled = true;
-      btnDeviceCaptureFace.innerHTML = '<span>Mire a la cámara del MinMoe...</span>';
-      appendConsoleLog('info', '[MinMoe Captura] Disparando captura remota... Mire a la cámara del lector biométrico.');
-
-      try {
-        const res = await fetch('/api/device/capture-face', { method: 'POST' });
-        const data = await res.json();
-
-        if (res.ok && data.success && data.imageBufferBase64) {
-          appendConsoleLog('success', `[MinMoe Captura OK] Rostro capturado con éxito (${data.sizeKB} KB).`);
-          
-          const previewContainer = document.getElementById('face-preview-container');
-          const previewImg = document.getElementById('face-preview-img');
-          const previewInfo = document.getElementById('face-preview-info');
-
-          if (previewImg && previewContainer && previewInfo) {
-            previewImg.src = data.imageBufferBase64;
-            previewInfo.textContent = `Capturada con MinMoe: 600x600 px (${data.sizeKB} KB, JPEG)`;
-            previewContainer.classList.remove('hidden');
-          }
-
-          // Convertir base64 a File para adjuntar en el formulario al guardar
-          const byteCharacters = atob(data.imageBufferBase64.split(',')[1]);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          capturedFaceBlob = new File([byteArray], 'minmoe_capture.jpg', { type: 'image/jpeg' });
-          alert('Foto capturada exitosamente con el biométrico MinMoe.');
-        } else {
-          appendConsoleLog('error', `[MinMoe Captura Error] ${data.error || 'No se pudo capturar el rostro.'}`);
-          alert(`Error en captura remota:\n${data.error || 'El dispositivo no completó la captura.'}`);
-        }
-      } catch (err) {
-        appendConsoleLog('error', `[MinMoe Captura Error] Excepción de conexión: ${err.message}`);
-        alert(`Error de comunicación con el biométrico:\n${err.message}`);
-      } finally {
-        btnDeviceCaptureFace.disabled = false;
-        btnDeviceCaptureFace.innerHTML = originalText;
-        if (typeof lucide !== 'undefined') lucide.createIcons();
-      }
-    });
-  }
-
-  // Botón para importar foto ya registrada físicamente en el MinMoe
-  const btnDeviceImportFace = document.getElementById('btn-device-import-face');
-  if (btnDeviceImportFace) {
-    btnDeviceImportFace.addEventListener('click', async () => {
-      const dbId = userDbIdInput.value;
-      if (!dbId) {
-        alert('Debe seleccionar un alumno existente para importar su foto.');
-        return;
-      }
-
-      const originalText = btnDeviceImportFace.innerHTML;
-      btnDeviceImportFace.disabled = true;
-      btnDeviceImportFace.innerHTML = '<span>Importando...</span>';
-      appendConsoleLog('info', `[MinMoe] Consultando fotografía existente en el biométrico...`);
-
-      try {
-        const res = await fetch(`${API_USERS}/${dbId}/import-face`, { method: 'POST' });
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-          appendConsoleLog('success', `[MinMoe OK] Fotografía importada y guardada localmente (${data.sizeKB} KB).`);
-          const previewContainer = document.getElementById('face-preview-container');
-          const previewImg = document.getElementById('face-preview-img');
-          const previewInfo = document.getElementById('face-preview-info');
-
-          if (previewImg && previewContainer && previewInfo) {
-            previewImg.src = `${API_USERS}/${dbId}/photo?t=${Date.now()}`;
-            previewInfo.textContent = `Importada desde MinMoe (${data.sizeKB} KB)`;
-            previewContainer.classList.remove('hidden');
-          }
-          alert('Fotografía importada con éxito desde el MinMoe y guardada localmente.');
-        } else {
-          appendConsoleLog('error', `[MinMoe Error] ${data.error || 'No se encontró fotografía en el lector.'}`);
-          alert(`No se pudo importar la foto:\n${data.error || 'No hay fotografía registrada en el MinMoe.'}`);
-        }
-      } catch (err) {
-        appendConsoleLog('error', `[MinMoe Error] Excepción: ${err.message}`);
-        alert(`Error de conexión:\n${err.message}`);
-      } finally {
-        btnDeviceImportFace.disabled = false;
-        btnDeviceImportFace.innerHTML = originalText;
-        if (typeof lucide !== 'undefined') lucide.createIcons();
-      }
-    });
   }
 
   btnShowAddUser.addEventListener('click', () => showUserForm());
@@ -641,45 +427,28 @@ document.addEventListener('DOMContentLoaded', () => {
       apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
     }
 
-    // Construct FormData to handle multipart text and files
-    const formData = new FormData();
-    formData.append('user_id', userIdInput.value.trim());
-    formData.append('name', userNameInput.value.trim());
-    formData.append('api_url', apiUrlValue);
-    
-    const faceInput = document.getElementById('user-face-image');
-    if (faceInput && faceInput.files && faceInput.files[0]) {
-      const originalFile = faceInput.files[0];
-      try {
-        appendConsoleLog('info', `Optimizando fotografía (${Math.round(originalFile.size / 1024)} KB) a formato cuadrado 1:1 (600x600 px)...`);
-        const optimizedFile = await optimizeFaceImage(originalFile);
-        formData.append('faceImage', optimizedFile);
-        appendConsoleLog('info', `Fotografía optimizada con éxito (${Math.round(optimizedFile.size / 1024)} KB, 600x600 px, JPEG).`);
-      } catch (optErr) {
-        console.warn('Fallo optimización de imagen:', optErr);
-        appendConsoleLog('warning', `No se pudo auto-comprimir foto: ${optErr.message}. Enviando original.`);
-        formData.append('faceImage', originalFile);
-      }
-    } else if (capturedFaceBlob) {
-      formData.append('faceImage', capturedFaceBlob);
-      appendConsoleLog('info', 'Adjuntando fotografía capturada con la cámara del MinMoe.');
-    }
+    const payload = {
+      user_id: userIdInput.value.trim(),
+      name: userNameInput.value.trim(),
+      api_url: apiUrlValue
+    };
 
     const isEdit = dbId !== '';
     const url = isEdit ? `${API_USERS}/${dbId}` : API_USERS;
     const method = isEdit ? 'PUT' : 'POST';
 
     try {
-      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} alumno "${userNameInput.value.trim()}" (ID: ${userIdInput.value.trim()})...`);
+      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} alumno "${payload.name}" (ID: ${payload.user_id})...`);
       const res = await fetch(url, {
         method: method,
-        body: formData // Browser sets proper boundary
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
 
       const responseData = await res.json();
 
       if (res.ok) {
-        appendConsoleLog('success', `Alumno "${userNameInput.value.trim()}" guardado en la base de datos local SQLite.`);
+        appendConsoleLog('success', `Alumno "${payload.name}" guardado en la base de datos local SQLite.`);
 
         if (responseData.syncSummary) {
           appendConsoleLog(responseData.synced ? 'success' : 'warning', `Biométrico MinMoe: ${responseData.syncSummary}`);
@@ -691,11 +460,9 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
 
-        let alertMessage = `Alumno "${userNameInput.value.trim()}" registrado en base de datos local SQLite.`;
-        if (responseData.faceSuccess === false) {
-          alertMessage += `\n\n[AVISO DEL BIOMETRICO]\nEl alumno fue registrado, pero la fotografia facial no se pudo cargar en el MinMoe.\n\nDetalle:\n${responseData.syncSummary || ''}`;
-        } else if (responseData.synced) {
-          alertMessage += `\n\n[OK] Sincronizado exitosamente con el biometrico MinMoe (Usuario, Tarjeta y Rostro).`;
+        let alertMessage = `Alumno "${payload.name}" registrado en base de datos local SQLite.`;
+        if (responseData.synced) {
+          alertMessage += `\n\n[OK] Sincronizado exitosamente con el biométrico MinMoe (Usuario y Tarjeta).`;
         } else if (responseData.syncSummary) {
           alertMessage += `\n\n[AVISO]:\n${responseData.syncSummary}`;
         }
@@ -872,18 +639,268 @@ document.addEventListener('DOMContentLoaded', () => {
   const qrModalUserInfo = document.getElementById('qr-modal-user-info');
   const qrModalUserId = document.getElementById('qr-modal-user-id');
   const btnCloseQrIcon = document.getElementById('btn-close-qr-icon');
+  const btnQrDownload = document.getElementById('btn-qr-download');
+  const btnQrCopy = document.getElementById('btn-qr-copy');
+  const btnQrShare = document.getElementById('btn-qr-share');
+  const qrShareOptions = document.getElementById('qr-share-options');
+  const btnShareWhatsapp = document.getElementById('btn-share-whatsapp');
+  const btnShareEmail = document.getElementById('btn-share-email');
+
+  let currentQrUser = null;
+  let currentQrUrl = '';
+
+  function downloadBlob(blob, filename) {
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  }
 
   function showUserQR(user) {
-    // Generate large clean QR code using the public api.qrserver.com
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=10&data=${encodeURIComponent(user.user_id)}`;
-    qrModalImage.src = qrUrl;
+    currentQrUser = user;
+    currentQrUrl = `/api/users/${user.id}/qr`;
+    qrModalImage.crossOrigin = 'anonymous';
+    qrModalImage.src = currentQrUrl;
     qrModalUserInfo.textContent = user.name;
     qrModalUserId.textContent = `ID: ${user.user_id}`;
+    if (qrShareOptions) qrShareOptions.classList.add('hidden');
     qrModal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  if (qrModalImage) {
+    qrModalImage.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'copyMove';
+    });
+  }
+
+  // Helper para obtener el Blob PNG de la imagen del QR local (via fetch o canvas fallback)
+  async function getQrImageBlob() {
+    try {
+      const response = await fetch(currentQrUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob && blob.size > 0) {
+          return blob;
+        }
+      }
+    } catch (_) {}
+
+    return new Promise((resolve, reject) => {
+      try {
+        const canvas = document.createElement('canvas');
+        const width = qrModalImage.naturalWidth || 400;
+        const height = qrModalImage.naturalHeight || 400;
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(qrModalImage, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('No se pudo procesar la imagen del codigo QR.'));
+        }, 'image/png');
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // Opcion 1: Guardar imagen (Descarga local)
+  if (btnQrDownload) {
+    btnQrDownload.addEventListener('click', async () => {
+      if (!currentQrUser) return;
+      const originalHtml = btnQrDownload.innerHTML;
+      btnQrDownload.disabled = true;
+      try {
+        const blob = await getQrImageBlob();
+        const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        downloadBlob(blob, filename);
+        appendConsoleLog('info', `[QR] Imagen descargada: ${filename}`);
+      } catch (err) {
+        appendConsoleLog('error', `[QR Error] Error al guardar imagen: ${err.message}`);
+        alert(`No se pudo guardar la imagen: ${err.message}`);
+      } finally {
+        btnQrDownload.disabled = false;
+        btnQrDownload.innerHTML = originalHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
+
+  // Opcion 2: Copiar imagen al portapapeles
+  if (btnQrCopy) {
+    btnQrCopy.addEventListener('click', async () => {
+      if (!currentQrUser) return;
+      const originalHtml = btnQrCopy.innerHTML;
+      btnQrCopy.disabled = true;
+
+      const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+
+      try {
+        const blob = await getQrImageBlob();
+
+        // Intento 1: API nativa ClipboardItem (funciona en contextos seguros/localhost)
+        if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+          try {
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            appendConsoleLog('success', `[QR] Imagen copiada al portapapeles para ${currentQrUser.name}.`);
+            btnQrCopy.innerHTML = '<i data-lucide="check" style="width: 16px; height: 16px;"></i> Imagen Copiada';
+            if (window.lucide) window.lucide.createIcons();
+            setTimeout(() => {
+              btnQrCopy.disabled = false;
+              btnQrCopy.innerHTML = originalHtml;
+              if (window.lucide) window.lucide.createIcons();
+            }, 2500);
+            return;
+          } catch (_) {}
+        }
+
+        // Si el navegador bloquea la copia binaria por ser HTTP no seguro:
+        // Descargamos la imagen localmente y avisamos al usuario
+        downloadBlob(blob, filename);
+        appendConsoleLog('info', `[QR] Imagen descargada como ${filename}. En red HTTP puede hacer clic derecho en la imagen y seleccionar "Copiar imagen".`);
+        alert(`En este entorno de red HTTP el navegador no permite acceso directo al portapapeles por seguridad.\n\nSe ha descargado el archivo "${filename}" a su equipo.\nTambien puede hacer clic derecho directamente sobre la imagen y seleccionar "Copiar imagen".`);
+      } catch (err) {
+        appendConsoleLog('error', `[QR Error] Error al procesar imagen: ${err.message}`);
+        alert(`No se pudo copiar la imagen: ${err.message}`);
+      } finally {
+        btnQrCopy.disabled = false;
+        btnQrCopy.innerHTML = originalHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
+
+  // Opcion 3: Compartir imagen
+  if (btnQrShare) {
+    btnQrShare.addEventListener('click', async () => {
+      if (!currentQrUser) return;
+      const originalHtml = btnQrShare.innerHTML;
+      btnQrShare.disabled = true;
+
+      try {
+        const blob = await getQrImageBlob();
+        const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
+
+        // Si el navegador soporta Web Share API con archivos reales (moviles o navegadores compatibles)
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              title: `Codigo QR - ${currentQrUser.name}`,
+              text: `Codigo QR de acceso para ${currentQrUser.name} (ID: ${currentQrUser.user_id})`,
+              files: [file]
+            });
+            appendConsoleLog('info', `[QR] Imagen compartida exitosamente para ${currentQrUser.name}.`);
+            return;
+          } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.warn('[QR Share] navigator.share error:', err);
+          }
+        }
+
+        // Si no soporta Web Share de archivos (ej. navegadores de escritorio en red local):
+        // 1. Intentamos copiar la imagen binaria al portapapeles si esta disponible
+        let clipboardCopied = false;
+        if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+          try {
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            clipboardCopied = true;
+          } catch (_) {}
+        }
+
+        // 2. Descargamos la imagen del QR de forma automatica
+        downloadBlob(blob, filename);
+
+        // 3. Mostramos las opciones de envio (WhatsApp y Correo)
+        if (qrShareOptions) {
+          qrShareOptions.classList.remove('hidden');
+          if (window.lucide) window.lucide.createIcons();
+        }
+
+        appendConsoleLog('info', `[QR] Imagen preparada (${filename}) para compartir.`);
+        const msg = clipboardCopied
+          ? `Se ha copiado la imagen del codigo QR al portapapeles y se ha descargado "${filename}".\n\nPuede pegar con Ctrl+V directamente en WhatsApp Web o en su correo, o arrastrar la imagen desde esta ventana.`
+          : `Se ha descargado la imagen "${filename}".\n\nPuede arrastrar la imagen directamente al chat de WhatsApp Web o adjuntar el archivo descargado en su correo.`;
+        alert(msg);
+      } catch (err) {
+        appendConsoleLog('error', `[QR Error] Error al preparar imagen para compartir: ${err.message}`);
+        alert(`No se pudo preparar la imagen: ${err.message}`);
+      } finally {
+        btnQrShare.disabled = false;
+        btnQrShare.innerHTML = originalHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
+
+  // Boton Compartir por WhatsApp
+  if (btnShareWhatsapp) {
+    btnShareWhatsapp.addEventListener('click', async () => {
+      if (!currentQrUser) return;
+      try {
+        const blob = await getQrImageBlob().catch(() => null);
+        const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+
+        if (blob) {
+          downloadBlob(blob, filename);
+          if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+            try {
+              const item = new ClipboardItem({ 'image/png': blob });
+              await navigator.clipboard.write([item]);
+            } catch (_) {}
+          }
+        }
+
+        const text = `Codigo QR de acceso - ${currentQrUser.name} (ID: ${currentQrUser.user_id})`;
+        const url = `https://web.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+        appendConsoleLog('info', `[QR] Abriendo WhatsApp Web para ${currentQrUser.name}.`);
+      } catch (err) {
+        appendConsoleLog('error', `[QR Error] Error al abrir WhatsApp: ${err.message}`);
+      }
+    });
+  }
+
+  // Boton Compartir por Correo Electronico
+  if (btnShareEmail) {
+    btnShareEmail.addEventListener('click', async () => {
+      if (!currentQrUser) return;
+      try {
+        const blob = await getQrImageBlob().catch(() => null);
+        const safeName = currentQrUser.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `qr_${safeName}_${currentQrUser.user_id}.png`;
+
+        if (blob) {
+          downloadBlob(blob, filename);
+        }
+
+        const subject = `Codigo QR de acceso - ${currentQrUser.name}`;
+        const body = `Hola,\n\nSe adjunta el codigo QR de acceso:\n\nAlumno: ${currentQrUser.name}\nMatricula / ID: ${currentQrUser.user_id}\n\n(Archivo descargado para adjuntar: ${filename})\n\nSaludos.`;
+        const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = url;
+        appendConsoleLog('info', `[QR] Abriendo cliente de correo para ${currentQrUser.name}...`);
+      } catch (err) {
+        appendConsoleLog('error', `[QR Error] Error al preparar correo: ${err.message}`);
+      }
+    });
   }
 
   if (btnCloseQrIcon) {
     btnCloseQrIcon.addEventListener('click', () => {
+      if (qrShareOptions) qrShareOptions.classList.add('hidden');
       qrModal.classList.add('hidden');
     });
   }
@@ -892,6 +909,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (qrModal) {
     qrModal.addEventListener('click', (e) => {
       if (e.target === qrModal) {
+        if (qrShareOptions) qrShareOptions.classList.add('hidden');
         qrModal.classList.add('hidden');
       }
     });

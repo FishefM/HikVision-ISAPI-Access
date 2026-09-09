@@ -88,7 +88,24 @@ const getUsers = () => new Promise((res, rej) => {
 });
 
 const getUserById = (userId) => new Promise((res, rej) => {
-  db.get("SELECT * FROM users WHERE user_id = ?", [userId], (err, row) => err ? rej(err) : res(row));
+  if (!userId) return res(null);
+  const cleanId = String(userId).trim();
+  db.get("SELECT * FROM users WHERE user_id = ? OR id = ?", [cleanId, cleanId], (err, row) => {
+    if (err) return rej(err);
+    if (row) return res(row);
+
+    // Fallback: Si el QR es una URL completa o contiene el identificador
+    db.all("SELECT * FROM users", [], (allErr, rows) => {
+      if (allErr) return rej(allErr);
+      const match = rows.find(u => 
+        cleanId === u.user_id || 
+        cleanId.includes(u.user_id) || 
+        (u.api_url && cleanId.includes(u.api_url)) ||
+        (u.api_url && u.api_url.includes(cleanId))
+      );
+      res(match || null);
+    });
+  });
 });
 
 const addUser = (userId, name, apiUrl) => new Promise((res, rej) => {
