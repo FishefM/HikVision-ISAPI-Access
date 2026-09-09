@@ -1,17 +1,68 @@
-const http = require('http');
-const https = require('https');
-const axios = require('axios');
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
 const { logEvent, broadcastFeedback, broadcastVerifying } = require('../utils/logger');
 
-// Agentes HTTP con IPv4 forzada y sin sockets persistentes colgados
-const cleanHttpAgent = new http.Agent({ keepAlive: false, family: 4 });
-const cleanHttpsAgent = new https.Agent({ keepAlive: false, family: 4, rejectUnauthorized: false });
-
 // Control de concurrencia y rebotes múltiples del lector
 const inFlightRequests = new Map();
 const recentVerifications = new Map();
+
+/**
+ * Consulta la API externa usando el cliente nativo HTTP/2 de Node.js
+ * con soporte para reintento rápido en caso de fallo de red transitorio.
+ */
+async function queryExternalApi(apiUrl, userId, name, eventType) {
+  const isLocalMock = apiUrl.includes('localhost') || apiUrl.includes('127.0.0.1');
+  let requestUrl = apiUrl;
+  if (isLocalMock) {
+    try {
+      const parsedUrl = new URL(requestUrl);
+      parsedUrl.searchParams.set('userId', userId);
+      parsedUrl.searchParams.set('name', name);
+      parsedUrl.searchParams.set('eventType', eventType);
+      requestUrl = parsedUrl.toString();
+    } catch (_) {}
+  }
+
+  const maxAttempts = 2;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const t0 = Date.now();
+    try {
+      const response = await fetch(requestUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        },
+        signal: AbortSignal.timeout(3500)
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      let data = null;
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          data = { message: text };
+        }
+      }
+
+      return { status: response.status, data, duration: Date.now() - t0 };
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxAttempts) {
+        logEvent('info', `Reintentando consulta a API externa tras fallo transitorio (${err.message})...`);
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+  }
+
+  throw lastError || new Error('No se pudo conectar con la API externa');
+}
 
 /**
  * Extrae el user ID y el número de serie de la solicitud del dispositivo.
@@ -130,11 +181,22 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
+  // Mostrar la informacion del MinMoe en consola exclusivamente cuando esta leyendo credenciales/usuarios (omitiendo heartbeats)
+  const isReading = !isHeartbeat && (userId || (eventType && eventType !== 'unknown' && eventType !== 'heartBeat'));
+  if (isReading) {
+    if (req.rawBody) {
+      const boundaryMatch = req.rawBody.match(/--MIME_boundary[\s\S]*?--MIME_boundary/);
+      const textToDisplay = (boundaryMatch && req.rawBody.length > 3000) ? boundaryMatch[0] + '--' : req.rawBody;
+      console.log(`\n[DEBUG Request Hikvision (${req.headers['content-type'] || 'sin content-type'})]:\n${textToDisplay}`);
+    }
+    if (req.body) {
+      console.log(`[DEBUG Parsed JSON/XML Body]:\n${JSON.stringify(req.body, null, 2)}\n`);
+    }
+  }
+
   return { userId, serialNo, eventType, isHeartbeat };
 }
 
-/**
- * Controlador principal de verificacion
 /**
  * Ejecuta la llamada a la base de datos, API externa y apertura de puerta
  */
@@ -167,31 +229,11 @@ async function executeAccessValidation(reqInfo, clientIp) {
     if (!user.api_url) {
       throw new Error('El usuario no tiene configurada una URL de API externa');
     }
-    const isLocalMock = user.api_url.includes('localhost') || user.api_url.includes('127.0.0.1');
-    const apiParams = isLocalMock ? {
-      userId: user.user_id,
-      name: user.name,
-      eventType: eventType
-    } : {};
+    const apiCallResult = await queryExternalApi(user.api_url, user.user_id, user.name, eventType);
+    apiResponse = apiCallResult.data;
+    logEvent('info', `API Respuesta (Status ${apiCallResult.status}, ${apiCallResult.duration}ms): ${JSON.stringify(apiResponse)}`);
 
-    const apiResponseCall = await axios.get(user.api_url, {
-      params: apiParams,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'close'
-      },
-      httpAgent: cleanHttpAgent,
-      httpsAgent: cleanHttpsAgent,
-      timeout: 8000 // 8 segundos de timeout
-    });
-
-    apiResponse = apiResponseCall.data;
-    logEvent('info', `API Respuesta (Status ${apiResponseCall.status}): ${JSON.stringify(apiResponse)}`);
-
-    if (apiResponseCall.status === 200 && apiResponse) {
+    if (apiCallResult.status === 200 && apiResponse) {
       if (apiResponse.student) {
         authorized = true;
         // Dynamically update the user's name with the one returned by the API
@@ -214,15 +256,7 @@ async function executeAccessValidation(reqInfo, clientIp) {
     }
   } catch (apiErr) {
     logEvent('error', `Error al consultar API externa: ${apiErr.message}`);
-    if (apiErr.response && apiErr.response.data) {
-      apiResponse = apiErr.response.data;
-      if (typeof apiResponse === 'string') {
-        apiResponse = { error: apiResponse };
-      }
-      logEvent('info', `API Respuesta de Error (Status ${apiErr.response.status}): ${JSON.stringify(apiResponse)}`);
-    } else {
-      apiResponse = { error: apiErr.message };
-    }
+    apiResponse = { error: apiErr.message };
   }
 
   // Log
@@ -312,27 +346,29 @@ async function processAccessRequest(reqInfo, clientIp) {
     logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`);
     try {
       const inFlightResult = await inFlightRequests.get(cleanUserId);
-      const settings = await dbHelper.getSettings();
-      if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
-        deviceHelper.sendRemoteCheck(
-          settings.device_ip,
-          settings.device_port,
-          settings.device_user,
-          settings.device_password,
-          serialNo,
-          inFlightResult.authorized
-        ).catch(() => {});
+      if (serialNo && serialNo !== inFlightResult.serialNo) {
+        const settings = await dbHelper.getSettings();
+        if (settings.device_ip && settings.device_user && settings.device_password) {
+          deviceHelper.sendRemoteCheck(
+            settings.device_ip,
+            settings.device_port,
+            settings.device_user,
+            settings.device_password,
+            serialNo,
+            inFlightResult.authorized
+          ).catch(() => {});
+        }
       }
       return { ...inFlightResult, serialNo };
     } catch (_) {}
   }
 
-  // 2. Cooldown anti-rebote: Si ya se validó este alumno hace menos de 2.5 segundos,
-  // devolvemos el mismo resultado sin volver a disparar la API externa ni cambiar el estado en el torniquete
+  // 2. Cooldown anti-rebote: Si ya se autorizó este alumno hace menos de 2.5 segundos,
+  // devolvemos el resultado autorizado sin volver a disparar la API externa ni duplicar apertura en el torniquete
   if (recentVerifications.has(cleanUserId)) {
     const recent = recentVerifications.get(cleanUserId);
-    if (Date.now() - recent.timestamp < 2500) {
-      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: ${recent.result.authorized ? 'Autorizado' : 'Denegado'}`);
+    if (recent.result && recent.result.authorized && (Date.now() - recent.timestamp < 2500)) {
+      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`);
       const settings = await dbHelper.getSettings();
       if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
         deviceHelper.sendRemoteCheck(
@@ -354,7 +390,9 @@ async function processAccessRequest(reqInfo, clientIp) {
 
   try {
     const result = await validationPromise;
-    recentVerifications.set(cleanUserId, { result, timestamp: Date.now() });
+    if (result && result.authorized) {
+      recentVerifications.set(cleanUserId, { result, timestamp: Date.now() });
+    }
     return result;
   } finally {
     inFlightRequests.delete(cleanUserId);
