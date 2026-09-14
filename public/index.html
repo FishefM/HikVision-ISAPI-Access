@@ -113,24 +113,6 @@
     <main class="app-main">
       <!-- Left Column: Operations and Settings -->
       <div class="main-column">
-        <!-- Quick link to Test Environment -->
-        <div class="panel glass" style="margin-bottom: 1.5rem;">
-          <div class="panel-header">
-            <div class="panel-title">
-              <i data-lucide="flask-conical"></i>
-              <h2>Entorno de Pruebas</h2>
-            </div>
-          </div>
-          <div class="panel-body">
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-              Las herramientas de simulación de escaneos, pruebas de apertura de torniquete y usuarios de prueba (1000, 1001, etc.) se gestionan en su espacio separado.
-            </p>
-            <a href="/pruebas" class="btn btn-secondary" style="width: 100%; justify-content: center; text-decoration: none;">
-              <i data-lucide="external-link"></i> Abrir Entorno de Pruebas (/pruebas)
-            </a>
-          </div>
-        </div>
-
         <!-- Device Settings -->
         <div class="panel glass">
           <div class="panel-header">
@@ -195,14 +177,9 @@
               <i data-lucide="users"></i>
               <h2>Base de Datos de Usuarios</h2>
             </div>
-            <div class="btn-group" style="display: flex; gap: 0.5rem;">
-              <button id="btn-sync-all-users" class="btn btn-secondary btn-sm" title="Sincronizar todos los alumnos con el MinMoe">
-                <i data-lucide="refresh-cw"></i> Sincronizar al MinMoe
-              </button>
-              <button id="btn-show-add-user" class="btn btn-success btn-sm">
-                <i data-lucide="user-plus"></i> Registrar Usuario
-              </button>
-            </div>
+            <button id="btn-show-add-user" class="btn btn-success btn-sm">
+              <i data-lucide="user-plus"></i> Registrar Usuario
+            </button>
           </div>
           <div class="panel-body">
             <!-- User form modal/section (hidden by default) -->
@@ -210,20 +187,18 @@
               <h3 id="user-form-title">Registrar Nuevo Usuario</h3>
               <form id="user-form">
                 <input type="hidden" id="user-db-id">
-                <div class="form-row">
-                  <div class="form-group flex-1">
-                    <label for="user-id">ID de Usuario (Numérico o Card No)</label>
-                    <input type="text" id="user-id" class="form-input" required placeholder="Ej: 1001 o ID numérico">
-                  </div>
-                  <div class="form-group flex-1">
-                    <label for="user-name">Nombre Completo</label>
-                    <input type="text" id="user-name" class="form-input" required placeholder="Ej: Juan Pérez">
-                  </div>
+                <input type="hidden" id="user-id">
+                <div class="form-group">
+                  <label for="user-name">Nombre Completo</label>
+                  <input type="text" id="user-name" class="form-input" required placeholder="Ej: Felix Pelaez Gonzalez">
                 </div>
                 <div class="form-group">
-                  <label for="user-api-url">API URL Relacionada (Opcional - Valor por defecto: Asistencia Local)</label>
-                  <input type="url" id="user-api-url" class="form-input" placeholder="http://localhost:3000/api/mock-external-api/allow">
-                  <small class="helper-text">Si se deja en blanco, se asignará la validación local automática.</small>
+                  <label for="user-api-url">API URL Relacionada (Opcional)</label>
+                  <input type="url" id="user-api-url" class="form-input" placeholder="https://multihivesoft.com/api/attendance/scan/...">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.35rem;">
+                    <small class="helper-text">El ID se extraerá automáticamente del hash de la URL o será generado por el sistema.</small>
+                    <span id="user-id-preview" style="font-size: 0.85rem; font-family: monospace; color: var(--accent); font-weight: 600;"></span>
+                  </div>
                 </div>
                 <div class="btn-group justify-end">
                   <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>

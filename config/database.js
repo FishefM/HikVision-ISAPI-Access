@@ -55,8 +55,6 @@ function initializeDatabase() {
         stmt.run("1001", "Juan Pérez (Permitido)", "http://localhost:3000/api/mock-external-api/allow");
         stmt.run("1002", "María Gómez (Denegado)", "http://localhost:3000/api/mock-external-api/deny");
         stmt.run("1003", "Carlos Ruíz (Error API)", "http://localhost:3000/api/mock-external-api/error");
-        stmt.run("cda21c1f", "Felix Pelaez Gonzalez", "https://multihivesoft.com/api/attendance/scan/cda21c1ff7a426acadf323eb0261da3949c98ffb00f2c016f1ecbb29c57f4d56");
-        stmt.run("77248842", "Alumno 77248842", "https://multihivesoft.com/api/attendance/scan/772488429f6ecf753920d435b41d45bf4ade9fc7cc71b3888739d3312cd99f71");
         stmt.finalize();
       }
     });

@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userForm = document.getElementById('user-form');
   const userDbIdInput = document.getElementById('user-db-id');
   const userIdInput = document.getElementById('user-id');
+  const userIdPreview = document.getElementById('user-id-preview');
   const userNameInput = document.getElementById('user-name');
   const userApiUrlInput = document.getElementById('user-api-url');
   const btnCancelUser = document.getElementById('btn-cancel-user');
@@ -188,9 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${escapeHTML(user.api_url)}</span></td>
         <td class="actions-col">
           <div class="action-btn-group">
-            <button class="btn btn-icon-only text-warning sync-user-btn" data-id="${user.id}" title="Sincronizar este alumno al MinMoe">
-              <i data-lucide="refresh-cw"></i>
-            </button>
             <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Código QR">
               <i data-lucide="qr-code"></i>
             </button>
@@ -210,35 +208,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) window.lucide.createIcons();
 
     // Attach Event Listeners to actions
-    document.querySelectorAll('.sync-user-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const id = parseInt(e.currentTarget.getAttribute('data-id'));
-        const user = usersList.find(u => u.id === id);
-        if (!user) return;
-        appendConsoleLog('info', `[MinMoe] Sincronizando alumno "${user.name}" (ID: ${user.user_id})...`);
-        btn.disabled = true;
-        try {
-          const res = await fetch(`${API_USERS}/${id}/sync-device`, { method: 'POST' });
-          const data = await res.json();
-          if (res.ok && data.success) {
-            appendConsoleLog('success', `[MinMoe OK] "${user.name}" sincronizado exitosamente en el biométrico.`);
-            alert(`Sincronización Exitosa:\nAlumno "${user.name}" registrado en la memoria del MinMoe.`);
-          } else {
-            const warnMsg = data.summary || data.error || 'Respuesta inesperada del biométrico';
-            appendConsoleLog('warning', `[MinMoe Advertencia] ${user.name}: ${warnMsg}`);
-            if (data.diagnostics && data.diagnostics.length > 0) {
-              data.diagnostics.forEach(d => appendConsoleLog('info', `  └─ ${d}`));
-            }
-            alert(`Aviso del Biométrico para "${user.name}":\n${warnMsg}`);
-          }
-        } catch (err) {
-          appendConsoleLog('error', `[MinMoe Error] Fallo de red: ${err.message}`);
-          alert(`Error de red al sincronizar: ${err.message}`);
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
 
     document.querySelectorAll('.qr-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -377,6 +346,52 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Form Actions & Modals
   // ==========================================================================
+  function extractIdFromUrl(url) {
+    if (!url) return '';
+    try {
+      const parsed = new URL(url);
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      if (segments.length > 0) {
+        const last = segments[segments.length - 1];
+        if (last && /^[a-zA-Z0-9_-]{8,}$/.test(last)) {
+          return last.substring(0, 8).toLowerCase();
+        }
+      }
+    } catch (_) {
+      const match = String(url).match(/([a-zA-Z0-9]{8,})/);
+      if (match && match[1]) {
+        return match[1].substring(0, 8).toLowerCase();
+      }
+    }
+    return '';
+  }
+
+  function updateUserIdPreview() {
+    if (!userIdPreview) return;
+    const url = userApiUrlInput.value.trim();
+    const isEdit = userDbIdInput.value !== '';
+    const extracted = extractIdFromUrl(url);
+
+    if (isEdit && userIdInput.value) {
+      if (extracted && extracted !== userIdInput.value) {
+        userIdPreview.textContent = `ID actual: ${userIdInput.value} | Nuevo detectado: ${extracted}`;
+      } else {
+        userIdPreview.textContent = `ID asignado: ${userIdInput.value}`;
+      }
+    } else if (extracted) {
+      userIdPreview.textContent = `ID asignado: ${extracted}`;
+      userIdInput.value = extracted;
+    } else if (url) {
+      userIdPreview.textContent = 'ID: Automático (generado por sistema)';
+      userIdInput.value = '';
+    } else {
+      userIdPreview.textContent = 'ID: Automático (generado por sistema)';
+      userIdInput.value = '';
+    }
+  }
+
+  userApiUrlInput.addEventListener('input', updateUserIdPreview);
+
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
     if (user) {
@@ -385,10 +400,13 @@ document.addEventListener('DOMContentLoaded', () => {
       userIdInput.value = user.user_id;
       userNameInput.value = user.name;
       userApiUrlInput.value = user.api_url;
+      updateUserIdPreview();
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Usuario';
       userForm.reset();
       userDbIdInput.value = '';
+      userIdInput.value = '';
+      updateUserIdPreview();
     }
   }
 
@@ -396,36 +414,12 @@ document.addEventListener('DOMContentLoaded', () => {
     userFormContainer.classList.add('hidden');
     userForm.reset();
     userDbIdInput.value = '';
+    userIdInput.value = '';
+    if (userIdPreview) userIdPreview.textContent = '';
   }
 
   btnShowAddUser.addEventListener('click', () => showUserForm());
   btnCancelUser.addEventListener('click', () => hideUserForm());
-
-  // Bulk Sync to Device listener
-  const btnSyncAllUsers = document.getElementById('btn-sync-all-users');
-  if (btnSyncAllUsers) {
-    btnSyncAllUsers.addEventListener('click', async () => {
-      if (!confirm('¿Desea sincronizar todos los alumnos de la base de datos con el biométrico Hikvision MinMoe?')) return;
-      appendConsoleLog('info', '[MinMoe] Iniciando sincronización masiva de alumnos...');
-      btnSyncAllUsers.disabled = true;
-      try {
-        const res = await fetch(`${API_USERS}/sync-all`, { method: 'POST' });
-        const data = await res.json();
-        if (res.ok) {
-          appendConsoleLog('success', `[MinMoe OK] ${data.message}`);
-          alert(`Sincronización Masiva:\n${data.message}`);
-        } else {
-          appendConsoleLog('error', `[MinMoe Error] ${data.error || 'Fallo en la sincronización masiva.'}`);
-          alert(`Error al sincronizar:\n${data.error}`);
-        }
-      } catch (err) {
-        appendConsoleLog('error', `[MinMoe Error] Fallo de conexión: ${err.message}`);
-        alert(`Error de conexión:\n${err.message}`);
-      } finally {
-        btnSyncAllUsers.disabled = false;
-      }
-    });
-  }
 
   userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -436,8 +430,13 @@ document.addEventListener('DOMContentLoaded', () => {
       apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
     }
 
+    let finalUserId = userIdInput.value.trim();
+    if (!finalUserId) {
+      finalUserId = extractIdFromUrl(apiUrlValue);
+    }
+
     const payload = {
-      user_id: userIdInput.value.trim(),
+      user_id: finalUserId,
       name: userNameInput.value.trim(),
       api_url: apiUrlValue
     };
@@ -447,7 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const method = isEdit ? 'PUT' : 'POST';
 
     try {
-      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} alumno "${payload.name}" (ID: ${payload.user_id})...`);
+      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} alumno "${payload.name}"${payload.user_id ? ` (ID: ${payload.user_id})` : ''}...`);
       const res = await fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
@@ -457,7 +456,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const responseData = await res.json();
 
       if (res.ok) {
-        appendConsoleLog('success', `Alumno "${payload.name}" guardado en la base de datos local SQLite.`);
+        const assignedId = (responseData.user && responseData.user.user_id) || payload.user_id;
+        appendConsoleLog('success', `Alumno "${payload.name}" (ID: ${assignedId}) guardado en la base de datos local SQLite.`);
 
         if (responseData.syncSummary) {
           appendConsoleLog(responseData.synced ? 'success' : 'warning', `Biométrico MinMoe: ${responseData.syncSummary}`);
@@ -469,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
 
-        let alertMessage = `Alumno "${payload.name}" registrado en base de datos local SQLite.`;
+        let alertMessage = `Alumno "${payload.name}" (ID: ${assignedId}) guardado en base de datos local SQLite.`;
         if (responseData.synced) {
           alertMessage += `\n\n[OK] Sincronizado exitosamente con el biométrico MinMoe (Usuario y Tarjeta).`;
         } else if (responseData.syncSummary) {

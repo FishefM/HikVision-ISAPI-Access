@@ -36,9 +36,10 @@ const authMiddleware = (req, res, next) => {
     '/api/logs-stream'
   ];
 
-  // Check if path is public, static assets, or Hikvision terminal POST events
+  // Check if path is public, static assets, mock validation APIs, or Hikvision terminal POST events
   if (
     publicRoutes.includes(req.path) ||
+    req.path.startsWith('/api/mock-external-api') ||
     req.path.startsWith('/css/') ||
     req.path.startsWith('/js/') ||
     req.path.startsWith('/favicon.ico') ||

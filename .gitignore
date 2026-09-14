@@ -92,6 +92,7 @@ ehthumbs.db
 Thumbs.db
 
 # Documentos
+documentacion/
 GUIA*
 *.pdf
 

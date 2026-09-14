@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const QRCode = require('qrcode');
 const dbHelper = require('../config/database');
 const { logEvent } = require('../utils/logger');
@@ -6,6 +7,29 @@ const deviceHelper = require('../utils/device');
 //-----------------------------------
 //----------CRUD Usuarios------------
 //-----------------------------------
+
+/**
+ * Extrae los primeros 8 caracteres del hash contenido en la URL de la API externa
+ */
+function extractIdFromApiUrl(apiUrl) {
+  if (!apiUrl) return null;
+  try {
+    const parsed = new URL(apiUrl);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (segments.length > 0) {
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment && /^[a-zA-Z0-9_-]{8,}$/.test(lastSegment)) {
+        return lastSegment.substring(0, 8).toLowerCase();
+      }
+    }
+  } catch (_) {
+    const match = String(apiUrl).match(/([a-zA-Z0-9]{8,})/);
+    if (match && match[1]) {
+      return match[1].substring(0, 8).toLowerCase();
+    }
+  }
+  return null;
+}
 
 /**
  * Determina si un registro corresponde a un usuario de pruebas o a un alumno real
@@ -47,7 +71,9 @@ async function getUsers(req, res) {
 }
 
 /**
- * Crea un nuevo usuario en la base de datos SQLite y sincroniza con el MinMoe
+ * Crea un nuevo usuario en la base de datos SQLite y sincroniza con el MinMoe.
+ * Si no se proporciona un user_id, se calcula automáticamente con los primeros 8
+ * caracteres del hash de la API externa (o se genera un identificador aleatorio de 8 dígitos).
  */
 async function addUser(req, res) {
   let { user_id, name, api_url } = req.body;
@@ -60,9 +86,18 @@ async function addUser(req, res) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
-  if (!user_id || !name) {
-    logEvent('warning', '[REGISTRO] Solicitud rechazada: Faltan campos obligatorios (ID de usuario o Nombre).');
-    return res.status(400).json({ error: 'Faltan campos obligatorios (ID de usuario y Nombre).' });
+  // Generación o extracción automática de user_id
+  if (!user_id) {
+    user_id = extractIdFromApiUrl(api_url);
+    if (!user_id) {
+      user_id = crypto.randomBytes(4).toString('hex');
+    }
+    logEvent('info', `[ID AUTOMÁTICO] ID generado/extraído para "${name}": "${user_id}"`);
+  }
+
+  if (!name) {
+    logEvent('warning', '[REGISTRO] Solicitud rechazada: Falta el campo obligatorio Nombre.');
+    return res.status(400).json({ error: 'Falta el campo obligatorio Nombre del alumno.' });
   }
 
   logEvent('info', `[DB] Intentando registrar alumno en SQLite: ID "${user_id}", Nombre: "${name}", API: "${api_url}"...`);
@@ -146,12 +181,25 @@ async function updateUser(req, res) {
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
 
-  if (!api_url) {
-    api_url = 'http://localhost:3000/api/mock-external-api/allow';
+  if (!name) {
+    return res.status(400).json({ error: 'Falta el campo obligatorio Nombre del alumno.' });
   }
 
-  if (!user_id || !name) {
-    return res.status(400).json({ error: 'Faltan campos obligatorios (ID de usuario y Nombre).' });
+  // Si no se proporcionó user_id, conservar el existente o generarlo/extraerlo
+  if (!user_id) {
+    const existing = await dbHelper.getUserById(id);
+    if (existing && existing.user_id) {
+      user_id = existing.user_id;
+    } else {
+      user_id = extractIdFromApiUrl(api_url);
+      if (!user_id) {
+        user_id = crypto.randomBytes(4).toString('hex');
+      }
+    }
+  }
+
+  if (!api_url) {
+    api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
   logEvent('info', `[DB] Actualizando alumno en SQLite (ID registro ${id}): User ID: "${user_id}", Nombre: "${name}"...`);
