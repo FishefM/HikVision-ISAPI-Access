@@ -1,15 +1,69 @@
 // middleware/auth.js
 const crypto = require('crypto');
 
-// Generate a deterministic session token based on server salt so restarts don't kick out the administrator
-function getSessionToken(secret = 'torniquete_admin_session_key_v1') {
-  return crypto.createHash('sha256').update(secret).digest('hex');
-}
+// Almacén de sesiones activas en memoria: token -> expiresAt (timestamp)
+const activeSessions = new Map();
+const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hora de validez
 
-const currentSessionToken = getSessionToken();
+// Clave secreta configurable por variable de entorno o generada al arranque
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const defaultSessionToken = crypto.createHash('sha256').update(sessionSecret).digest('hex');
+
+// Se registra la sesión base inicial
+activeSessions.set(defaultSessionToken, Date.now() + (24 * 60 * 60 * 1000));
 
 /**
- * Utility to parse cookies manually from raw request headers.
+ * Crea una nueva sesión única y segura para el administrador.
+ * @returns {string} Token de sesión en formato hexadecimal.
+ */
+function createSession() {
+  const token = crypto.randomBytes(32).toString('hex');
+  activeSessions.set(token, Date.now() + SESSION_TTL_MS);
+  return token;
+}
+
+/**
+ * Destruye una sesión activa existente.
+ * @param {string} token
+ */
+function destroySession(token) {
+  if (token) {
+    activeSessions.delete(token);
+  }
+}
+
+/**
+ * Valida si un token de sesión es válido y no ha expirado.
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isValidSession(token) {
+  if (!token) return false;
+  const expiresAt = activeSessions.get(token);
+  if (!expiresAt) return false;
+
+  if (Date.now() > expiresAt) {
+    activeSessions.delete(token);
+    return false;
+  }
+
+  // Renovar ventana de expiración si está activa (sliding expiration)
+  activeSessions.set(token, Date.now() + SESSION_TTL_MS);
+  return true;
+}
+
+// Limpieza periódica de sesiones expiradas cada 15 minutos
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, expiresAt] of activeSessions.entries()) {
+    if (now > expiresAt) {
+      activeSessions.delete(token);
+    }
+  }
+}, 15 * 60 * 1000).unref();
+
+/**
+ * Utilidad para extraer cookies desde los headers HTTP sin dependencias externas.
  */
 function parseCookies(req) {
   const list = {};
@@ -24,11 +78,11 @@ function parseCookies(req) {
 }
 
 /**
- * Authentication middleware that protects index.html and all administrative endpoints.
- * Exempts public pages, static assets, and Hikvision hardware requests.
+ * Middleware de autenticación que protege el Dashboard y los endpoints administrativos.
+ * Exenta vistas públicas, recursos estáticos, simulaciones y webhooks del hardware Hikvision.
  */
 const authMiddleware = (req, res, next) => {
-  // Define public static assets and public API endpoints
+  // Rutas públicas y endpoints del monitor / webhooks
   const publicRoutes = [
     '/login.html',
     '/feedback.html',
@@ -36,7 +90,7 @@ const authMiddleware = (req, res, next) => {
     '/api/logs-stream'
   ];
 
-  // Check if path is public, static assets, mock validation APIs, or Hikvision terminal POST events
+  // Comprobar si la ruta es pública o es una notificación del hardware
   if (
     publicRoutes.includes(req.path) ||
     req.path.startsWith('/api/mock-external-api') ||
@@ -54,23 +108,26 @@ const authMiddleware = (req, res, next) => {
     return next();
   }
 
-  // Verify session cookie
+  // Verificar la cookie de sesión del administrador
   const cookies = parseCookies(req);
-  if (cookies.admin_session === currentSessionToken) {
+  if (isValidSession(cookies.admin_session)) {
     return next();
   }
 
-  // Redirect page requests to login.html
+  // Redirigir peticiones de páginas HTML al login
   if (req.path === '/' || req.path === '/pruebas' || req.path.endsWith('.html')) {
     return res.redirect('/login.html');
   }
 
-  // Deny access to other API endpoints
+  // Denegar peticiones a endpoints de API no autorizados
   return res.status(401).json({ error: 'No autorizado. Por favor inicie sesión.' });
 };
 
 module.exports = {
   authMiddleware,
-  currentSessionToken,
+  createSession,
+  destroySession,
+  isValidSession,
+  currentSessionToken: defaultSessionToken,
   parseCookies
 };

@@ -6,9 +6,13 @@ const { logEvent, broadcastFeedback, broadcastVerifying } = require('../utils/lo
 const inFlightRequests = new Map();
 const recentVerifications = new Map();
 
+// Límite máximo de tiempo estricto para evitar timeout físico en terminal Hikvision (< 1500ms)
+const DEFAULT_EXTERNAL_TIMEOUT_MS = parseInt(process.env.EXTERNAL_API_TIMEOUT_MS, 10) || 1100;
+const MAX_TOTAL_BUDGET_MS = 1350;
+
 /**
- * Consulta la API externa usando el cliente nativo HTTP/2 de Node.js
- * con soporte para reintento rápido en caso de fallo de red transitorio.
+ * Consulta la API externa usando fetch nativo de Node.js
+ * con presupuesto estricto de tiempo (< 1350ms) para garantizar respuesta dentro de los 1.5s de Hikvision.
  */
 async function queryExternalApi(apiUrl, userId, name, eventType) {
   const isLocalMock = apiUrl.includes('localhost') || apiUrl.includes('127.0.0.1');
@@ -23,11 +27,22 @@ async function queryExternalApi(apiUrl, userId, name, eventType) {
     } catch (_) {}
   }
 
+  const overallStart = Date.now();
   const maxAttempts = 2;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const elapsed = Date.now() - overallStart;
+    const remainingBudget = MAX_TOTAL_BUDGET_MS - elapsed;
+
+    // Si quedan menos de 250ms, abortar para no exceder la ventana del hardware
+    if (remainingBudget <= 250) {
+      break;
+    }
+
+    const currentTimeout = Math.min(DEFAULT_EXTERNAL_TIMEOUT_MS, remainingBudget);
     const t0 = Date.now();
+
     try {
       const response = await fetch(requestUrl, {
         method: 'GET',
@@ -35,7 +50,7 @@ async function queryExternalApi(apiUrl, userId, name, eventType) {
           'Accept': 'application/json, text/plain, */*',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         },
-        signal: AbortSignal.timeout(3500)
+        signal: AbortSignal.timeout(currentTimeout)
       });
 
       const contentType = response.headers.get('content-type') || '';
@@ -53,10 +68,23 @@ async function queryExternalApi(apiUrl, userId, name, eventType) {
 
       return { status: response.status, data, duration: Date.now() - t0 };
     } catch (err) {
-      lastError = err;
-      if (attempt < maxAttempts) {
+      const isTimeout = err.name === 'TimeoutError' || 
+                        err.name === 'AbortError' || 
+                        (err.message && err.message.toLowerCase().includes('timeout'));
+
+      if (isTimeout) {
+        lastError = new Error(`API_TIMEOUT: La API externa excedió el tiempo límite (${currentTimeout}ms) del torniquete`);
+      } else {
+        lastError = err;
+      }
+
+      // Solo reintentar si el tiempo restante total permite al menos un intento de 350ms
+      const timeRemainingForRetry = MAX_TOTAL_BUDGET_MS - (Date.now() - overallStart);
+      if (attempt < maxAttempts && timeRemainingForRetry > 400 && !isTimeout) {
         logEvent('info', `Reintentando consulta a API externa tras fallo transitorio (${err.message})...`);
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 60));
+      } else {
+        break;
       }
     }
   }

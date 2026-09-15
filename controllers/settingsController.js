@@ -1,9 +1,10 @@
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
 const { logEvent } = require('../utils/logger');
+const { hashPassword } = require('../utils/security');
 
 /**
- * Obtiene configuraciones
+ * Obtiene configuraciones sanitizadas excluyendo credenciales sensibles
  */
 async function getSettings(req, res) {
   try {
@@ -19,18 +20,24 @@ async function getSettings(req, res) {
 }
 
 /**
- * Update configuraciones
+ * Actualiza configuraciones del sistema, hasheando la contraseña administrativa
  */
 async function updateSettings(req, res) {
   try {
     const data = { ...req.body };
+
     // Prevent empty password inputs from wiping out existing passwords
     if (!data.device_password || String(data.device_password).trim() === '') {
       delete data.device_password;
     }
-    if (!data.admin_password || String(data.admin_password).trim() === '') {
+
+    // Hashear la contraseña de administración con scrypt si se proporcionó una nueva
+    if (data.admin_password && String(data.admin_password).trim() !== '') {
+      data.admin_password = hashPassword(String(data.admin_password).trim());
+    } else {
       delete data.admin_password;
     }
+
     await dbHelper.updateSettings(data);
     logEvent('info', 'Configuración de dispositivo y acceso actualizada.');
     res.json({ success: true });
@@ -40,7 +47,7 @@ async function updateSettings(req, res) {
 }
 
 /**
- * Trigger Para apertura manual
+ * Trigger para apertura manual desde el dashboard
  */
 async function openDoor(req, res) {
   try {
@@ -80,7 +87,7 @@ async function openDoor(req, res) {
 }
 
 /**
- * Boton Eliminar Logs
+ * Vaciar historial de logs
  */
 async function clearLogs(req, res) {
   try {
@@ -93,7 +100,7 @@ async function clearLogs(req, res) {
 }
 
 /**
- * Retorna los ultimos logs de la BD
+ * Retorna los últimos registros de logs de la BD
  */
 async function getLogs(req, res) {
   try {

@@ -47,6 +47,10 @@ function initializeDatabase() {
       )
     `);
 
+    // Crear índices para optimizar consultas frecuentes
+    db.run(`CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs (timestamp)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_users_user_id ON users (user_id)`);
+
     // Insertar datos de ejemplo en la tabla de usuarios si está vacía
     db.all("SELECT COUNT(*) as count FROM users", [], (err, rows) => {
       if (!err && rows[0].count === 0) {
@@ -76,6 +80,9 @@ function initializeDatabase() {
         // Asegurarse de que la configuración predeterminada esté presente
         db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_password', 'admin123')");
       }
+
+      // Ejecutar mantenimiento inicial de purga de logs antiguos
+      cleanOldLogs().catch(() => {});
     });
   });
 }
@@ -147,6 +154,34 @@ const clearLogs = () => new Promise((res, rej) => {
   db.run("DELETE FROM access_logs", [], (err) => err ? rej(err) : res(true));
 });
 
+/**
+ * Purga registros de accesos más antiguos de N días
+ * @param {number} days - Días de retención (por defecto 30 días)
+ */
+const cleanOldLogs = (days) => new Promise((res, rej) => {
+  const retentionDays = parseInt(days || process.env.LOG_RETENTION_DAYS || 30, 10);
+  db.run(
+    "DELETE FROM access_logs WHERE timestamp < datetime('now', '-' || ? || ' days')",
+    [retentionDays],
+    function(err) {
+      if (err) {
+        console.error('[DB ERROR] Error al purgar logs antiguos:', err.message);
+        rej(err);
+      } else {
+        if (this.changes > 0) {
+          console.log(`[DB] Mantenimiento automático: ${this.changes} registros antiguos (> ${retentionDays} días) purgados.`);
+        }
+        res(this.changes);
+      }
+    }
+  );
+});
+
+// Programar mantenimiento diario automático de logs
+setInterval(() => {
+  cleanOldLogs().catch(() => {});
+}, 24 * 60 * 60 * 1000).unref();
+
 // Settings methods
 const getSettings = () => new Promise((res, rej) => {
   db.all("SELECT * FROM settings", [], (err, rows) => {
@@ -184,6 +219,7 @@ module.exports = {
   getLogs,
   addLog,
   clearLogs,
+  cleanOldLogs,
   getSettings,
   updateSettings,
   db

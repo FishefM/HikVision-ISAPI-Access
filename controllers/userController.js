@@ -321,10 +321,21 @@ async function deleteUser(req, res) {
 }
 
 /**
+// Control de concurrencia para evitar peticiones masivas duplicadas simultáneas
+let isSyncInProgress = false;
+
+/**
  * Sincroniza TODOS los alumnos existentes en la base de datos hacia el dispositivo MinMoe
  */
 async function syncAllUsers(req, res) {
+  if (isSyncInProgress) {
+    return res.status(409).json({
+      error: 'Ya hay una sincronización masiva en proceso hacia el biométrico. Por favor espere a que termine.'
+    });
+  }
+
   logEvent('info', '=== INICIANDO SINCRONIZACIÓN DE TODOS LOS ALUMNOS AL MINMOE ===');
+  isSyncInProgress = true;
 
   try {
     const settings = await dbHelper.getSettings();
@@ -351,7 +362,8 @@ async function syncAllUsers(req, res) {
 
     for (let i = 0; i < users.length; i++) {
       const u = users[i];
-      logEvent('info', `[${i + 1}/${users.length}] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
+      const progressPercent = Math.round(((i + 1) / users.length) * 100);
+      logEvent('info', `[MinMoe ${progressPercent}%] [${i + 1}/${users.length}] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
 
       const syncRes = await deviceHelper.syncFullUserToDevice(settings, u);
       if (syncRes.synced) {
@@ -368,6 +380,11 @@ async function syncAllUsers(req, res) {
         synced: syncRes.synced,
         diagnostics: syncRes.diagnostics
       });
+
+      // Breve pausa para no saturar el socket del hardware embebido Hikvision
+      if (i < users.length - 1) {
+        await new Promise(r => setTimeout(r, 25));
+      }
     }
 
     const summaryMsg = `Sincronización completada: ${syncedCount} exitosos, ${failedCount} con advertencias de un total de ${users.length}.`;
@@ -384,6 +401,8 @@ async function syncAllUsers(req, res) {
   } catch (err) {
     logEvent('error', `[MinMoe ERROR CRÍTICO] Fallo en la sincronización global: ${err.message}`);
     res.status(500).json({ error: `Error durante la sincronización: ${err.message}` });
+  } finally {
+    isSyncInProgress = false;
   }
 }
 
