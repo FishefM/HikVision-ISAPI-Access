@@ -81,11 +81,6 @@ async function addUser(req, res) {
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
 
-  // Asignar API URL por defecto si el usuario no ingresó una
-  if (!api_url) {
-    api_url = 'http://localhost:3000/api/mock-external-api/allow';
-  }
-
   // Generación o extracción automática de user_id
   if (!user_id) {
     user_id = extractIdFromApiUrl(api_url);
@@ -196,10 +191,6 @@ async function updateUser(req, res) {
         user_id = crypto.randomBytes(4).toString('hex');
       }
     }
-  }
-
-  if (!api_url) {
-    api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
   logEvent('info', `[DB] Actualizando alumno en SQLite (ID registro ${id}): User ID: "${user_id}", Nombre: "${name}"...`);

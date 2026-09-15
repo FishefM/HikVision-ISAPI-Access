@@ -186,7 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tr.innerHTML = `
         <td><strong>${escapeHTML(user.user_id)}</strong></td>
         <td>${escapeHTML(user.name)}</td>
-        <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${escapeHTML(user.api_url)}</span></td>
+        <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${user.api_url ? escapeHTML(user.api_url) : '<span style="font-style:italic; opacity:0.6;">Sin URL</span>'}</span></td>
         <td class="actions-col">
           <div class="action-btn-group">
             <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Código QR">
@@ -426,12 +426,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const dbId = userDbIdInput.value;
     
     let apiUrlValue = userApiUrlInput.value.trim();
-    if (!apiUrlValue) {
-      apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
-    }
 
     let finalUserId = userIdInput.value.trim();
-    if (!finalUserId) {
+    if (!finalUserId && apiUrlValue) {
       finalUserId = extractIdFromUrl(apiUrlValue);
     }
 
