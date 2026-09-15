@@ -41,12 +41,12 @@ function isTestUser(user) {
   const name = String(user.name || '').toLowerCase();
   
   return /^100\d*$/.test(uid) || 
-         url.includes('mock-external-api') || 
-         url.includes('localhost:3000/api/mock') || 
-         url.includes('127.0.0.1:3000/api/mock') ||
+         url.includes('mock-external-api/deny') || 
+         url.includes('mock-external-api/error') || 
          name.includes('(permitido)') || 
          name.includes('(denegado)') || 
          name.includes('(error api)') ||
+         name.includes('demo') ||
          name.includes('prueba');
 }
 
@@ -80,6 +80,11 @@ async function addUser(req, res) {
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
+
+  // Asignar API URL de validación permitida (allow) por defecto si no se ingresó una
+  if (!api_url) {
+    api_url = 'http://localhost:3000/api/mock-external-api/allow';
+  }
 
   // Generación o extracción automática de user_id
   if (!user_id) {
@@ -191,6 +196,10 @@ async function updateUser(req, res) {
         user_id = crypto.randomBytes(4).toString('hex');
       }
     }
+  }
+
+  if (!api_url) {
+    api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
   logEvent('info', `[DB] Actualizando alumno en SQLite (ID registro ${id}): User ID: "${user_id}", Nombre: "${name}"...`);

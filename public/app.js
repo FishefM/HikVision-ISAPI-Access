@@ -426,9 +426,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const dbId = userDbIdInput.value;
     
     let apiUrlValue = userApiUrlInput.value.trim();
+    if (!apiUrlValue) {
+      apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
+    }
 
     let finalUserId = userIdInput.value.trim();
-    if (!finalUserId && apiUrlValue) {
+    if (!finalUserId && apiUrlValue !== 'http://localhost:3000/api/mock-external-api/allow') {
       finalUserId = extractIdFromUrl(apiUrlValue);
     }
 
