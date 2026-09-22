@@ -34,13 +34,26 @@ app.use('/', deviceRoutes);
 // Mount Admin REST API endpoints
 app.use('/api', apiRoutes);
 
-// Route for testing and simulation environment
+// Clean UI Routes
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/feedback', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'feedback.html'));
+});
+
 app.get('/pruebas', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'pruebas.html'));
 });
 
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // Serve dashboard static assets
 app.use(express.static(path.join(__dirname, 'public')));
+
 
 // Boot server listener
 app.listen(PORT, () => {

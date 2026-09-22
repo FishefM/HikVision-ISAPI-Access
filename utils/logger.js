@@ -27,7 +27,7 @@ function logEvent(type, message) {
 /**
  * Broadcasts a visual access feedback event to the dedicated feedback screens.
  */
-function broadcastFeedback(authorized, name, userId, reason) {
+function broadcastFeedback(authorized, name, userId, reason, deviceId = null, deviceName = null) {
   const feedbackObj = {
     type: 'access_feedback',
     status: authorized ? 'authorized' : 'denied',
@@ -35,6 +35,8 @@ function broadcastFeedback(authorized, name, userId, reason) {
     name,
     userId,
     reason,
+    deviceId,
+    deviceName,
     timestamp: new Date().toISOString()
   };
   const data = JSON.stringify(feedbackObj);
@@ -47,13 +49,15 @@ function broadcastFeedback(authorized, name, userId, reason) {
  * Broadcasts a pending/verifying state to the dedicated feedback screens
  * when the credential has been read and user identified, waiting for external API.
  */
-function broadcastVerifying(name, userId, eventType) {
+function broadcastVerifying(name, userId, eventType, deviceId = null, deviceName = null) {
   const verifyingObj = {
     type: 'access_feedback',
     status: 'verifying',
     name,
     userId,
     eventType,
+    deviceId,
+    deviceName,
     timestamp: new Date().toISOString()
   };
   const data = JSON.stringify(verifyingObj);
@@ -68,3 +72,4 @@ module.exports = {
   broadcastVerifying,
   sseClients
 };
+

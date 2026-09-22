@@ -437,13 +437,23 @@
       lucide.createIcons();
     }
 
+    // Obtener parámetro de dispositivo desde la URL (?device=1)
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetDeviceId = urlParams.get('device');
+    const deviceBadge = document.getElementById('device-indicator');
+
+    if (targetDeviceId && deviceBadge) {
+      deviceBadge.textContent = `Torniquete ID: ${targetDeviceId}`;
+      deviceBadge.style.display = 'inline-block';
+    }
+
     // Trigger Verifying / Pending State (Credential read, waiting for external API)
-    function showVerifying(name, userId) {
+    function showVerifying(name, userId, deviceName) {
       if (resetTimer) clearTimeout(resetTimer);
 
       screenViewport.className = 'screen state-verifying';
       stateIcon.setAttribute('data-lucide', 'loader-2');
-      statusTitle.textContent = 'Credencial Leída';
+      statusTitle.textContent = deviceName ? `Credencial Leída (${deviceName})` : 'Credencial Leída';
       statusTitle.style.display = 'block';
 
       userDisplay.textContent = name || '';
@@ -463,7 +473,7 @@
     }
 
     // Trigger visual states
-    function showFeedback(authorized, name, userId, reason) {
+    function showFeedback(authorized, name, userId, reason, deviceName) {
       // Clear existing reset timer
       if (resetTimer) clearTimeout(resetTimer);
 
@@ -471,7 +481,7 @@
         // Success State
         screenViewport.className = 'screen state-success';
         stateIcon.setAttribute('data-lucide', 'check');
-        statusTitle.textContent = 'Acceso Autorizado';
+        statusTitle.textContent = deviceName ? `Acceso Autorizado • ${deviceName}` : 'Acceso Autorizado';
         userDisplay.textContent = name || '';
         userDisplay.style.display = name ? 'block' : 'none';
         subMessage.style.display = 'none';
@@ -482,7 +492,7 @@
         // Denied State
         screenViewport.className = 'screen state-denied';
         stateIcon.setAttribute('data-lucide', 'lock');
-        statusTitle.textContent = 'Acceso Denegado';
+        statusTitle.textContent = deviceName ? `Acceso Denegado • ${deviceName}` : 'Acceso Denegado';
         userDisplay.textContent = name === 'Desconocido' ? 'Usuario Desconocido' : (name || '');
         userDisplay.style.display = name ? 'block' : 'none';
         subMessage.style.display = 'none';
@@ -510,10 +520,15 @@
           const data = JSON.parse(event.data);
           // Intercept access feedback events
           if (data.type === 'access_feedback') {
+            // Filtrar por torniquete si la URL tiene ?device=ID
+            if (targetDeviceId && data.deviceId && String(data.deviceId) !== String(targetDeviceId)) {
+              return; // Omitir eventos de otros torniquetes
+            }
+
             if (data.status === 'verifying') {
-              showVerifying(data.name, data.userId);
+              showVerifying(data.name, data.userId, data.deviceName);
             } else {
-              showFeedback(data.authorized, data.name, data.userId, data.reason);
+              showFeedback(data.authorized, data.name, data.userId, data.reason, data.deviceName);
             }
           }
         } catch (err) {
@@ -539,3 +554,4 @@
   </script>
 </body>
 </html>
+

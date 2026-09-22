@@ -5,13 +5,21 @@ const authController = require('../controllers/authController');
 const userController = require('../controllers/userController');
 const settingsController = require('../controllers/settingsController');
 const accessController = require('../controllers/accessController');
+const { requireAdmin } = require('../middleware/auth');
 const { logEvent, sseClients } = require('../utils/logger');
 
-// Authentication routes
+// Authentication & Session routes
 router.post('/login', authController.login);
 router.post('/logout', authController.logout);
+router.get('/me', authController.getMe);
 
-// User DB routes
+// Receptionists CRUD routes (Admin only)
+router.get('/receptionists', requireAdmin, authController.getReceptionists);
+router.post('/receptionists', requireAdmin, authController.addReceptionist);
+router.put('/receptionists/:id', requireAdmin, authController.updateReceptionist);
+router.delete('/receptionists/:id', requireAdmin, authController.deleteReceptionist);
+
+// User DB routes (Accessible by both Admin and Receptionist)
 router.get('/users', userController.getUsers);
 router.get('/users/:id/qr', userController.getUserQR);
 router.post('/users', userController.addUser);
@@ -20,13 +28,22 @@ router.delete('/users/:id', userController.deleteUser);
 router.post('/users/sync-all', userController.syncAllUsers);
 router.post('/users/:id/sync-device', userController.syncSingleUser);
 
-// Settings routes
-router.get('/settings', settingsController.getSettings);
-router.post('/settings', settingsController.updateSettings);
+// MinMoe Devices routes (Read-only for receptionist dropdowns, modifications require Admin)
+router.get('/devices', settingsController.getDevices);
+router.post('/devices', requireAdmin, settingsController.addDevice);
+router.get('/devices/:id', settingsController.getDevice);
+router.put('/devices/:id', requireAdmin, settingsController.updateDevice);
+router.delete('/devices/:id', requireAdmin, settingsController.deleteDevice);
+router.post('/devices/:id/test-ping', settingsController.testDevicePing);
+router.post('/devices/:id/open-door', settingsController.openDoor);
 
-// Logs routes
+// Settings routes (Admin only for security modifications)
+router.get('/settings', settingsController.getSettings);
+router.post('/settings', requireAdmin, settingsController.updateSettings);
+
+// Logs routes (Clear logs is Admin only, viewing logs is open to receptionists)
 router.get('/logs', settingsController.getLogs);
-router.post('/logs/clear', settingsController.clearLogs);
+router.post('/logs/clear', requireAdmin, settingsController.clearLogs);
 
 // Door control routes
 router.post('/test-open-door', settingsController.openDoor);

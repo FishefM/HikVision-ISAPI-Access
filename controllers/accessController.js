@@ -62,7 +62,13 @@ async function queryExternalApi(apiUrl, userId, name, eventType) {
         try {
           data = JSON.parse(text);
         } catch (_) {
-          data = { message: text };
+          if (text.includes('<html') || text.includes('<!DOCTYPE') || text.includes('<body')) {
+            const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
+            const title = titleMatch ? titleMatch[1].trim() : `Página no encontrada (HTTP ${response.status})`;
+            data = { message: `[HTTP ${response.status}] ${title}` };
+          } else {
+            data = { message: text.slice(0, 200) };
+          }
         }
       }
 
@@ -226,30 +232,88 @@ function extractDeviceRequestInfo(req) {
 }
 
 /**
+ * Extrae una dirección IPv4 limpia omitiendo prefijos IPv6
+ */
+function cleanIPv4(ip) {
+  if (!ip) return '127.0.0.1';
+  let str = String(ip).trim();
+  if (str.includes('::ffff:')) {
+    str = str.replace('::ffff:', '');
+  }
+  return str.split(':')[0].trim();
+}
+
+/**
  * Ejecuta la llamada a la base de datos, API externa y apertura de puerta
  */
 async function executeAccessValidation(reqInfo, clientIp) {
   const { userId, serialNo, eventType } = reqInfo;
 
-  // Checar la base de datos local para el usuario
-  logEvent('info', `Consultando base de datos para el usuario ID: ${userId}...`);
+  // 1. Identificar el dispositivo MinMoe que origina la solicitud
+  const formattedIp = cleanIPv4(clientIp);
+  let device = await dbHelper.getDeviceByIp(formattedIp);
+  if (!device) {
+    device = await dbHelper.getDefaultDevice();
+  }
+
+  const deviceId = device ? device.id : null;
+  const deviceName = device ? device.name : 'Torniquete';
+  const deviceIp = device ? device.ip : formattedIp;
+
+  // 2. Checar la base de datos local para el usuario
+  logEvent('info', `[${deviceName}] Consultando base de datos para el usuario ID: ${userId}...`);
   const user = await dbHelper.getUserById(userId);
 
   if (!user) {
-    logEvent('warning', `Usuario con ID ${userId} no está registrado en la base de datos local.`);
-    await dbHelper.addLog(userId, 'No registrado', eventType, 'N/A', { error: 'User not registered' }, false, false);
-    broadcastFeedback(false, 'Desconocido', userId, 'ID de tarjeta no registrado');
-    return { authorized: false, reason: 'User not registered', serialNo };
+    logEvent('warning', `[${deviceName}] Usuario con ID ${userId} no está registrado en la base de datos local.`);
+    await dbHelper.addLog(userId, 'No registrado', eventType, 'N/A', { error: 'User not registered' }, false, false, deviceId, deviceName, deviceIp);
+    broadcastFeedback(false, 'Desconocido', userId, 'ID de tarjeta no registrado', deviceId, deviceName);
+    
+    // Notificar rechazo al lector físico
+    if (serialNo && device && device.ip && device.username && device.password) {
+      deviceHelper.sendRemoteCheck(
+        device.ip,
+        device.port || 80,
+        device.username,
+        device.password,
+        serialNo,
+        false
+      ).catch(() => {});
+    }
+
+    return { authorized: false, reason: 'User not registered', serialNo, deviceId, deviceName };
   }
 
-  logEvent('success', `Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`);
+  // 3. Verificar si el usuario está autorizado en ESTE torniquete específico
+  const isAllowedOnDevice = await dbHelper.isUserAllowedOnDevice(user.user_id, deviceId);
+  if (!isAllowedOnDevice) {
+    const denyMsg = `No autorizado para ${deviceName}`;
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El usuario "${user.name}" (${user.user_id}) no está asignado a este torniquete.`);
+    await dbHelper.addLog(userId, user.name, eventType, user.api_url, { error: denyMsg }, false, false, deviceId, deviceName, deviceIp);
+    broadcastFeedback(false, user.name, userId, denyMsg, deviceId, deviceName);
+
+    if (serialNo && device && device.ip && device.username && device.password) {
+      deviceHelper.sendRemoteCheck(
+        device.ip,
+        device.port || 80,
+        device.username,
+        device.password,
+        serialNo,
+        false
+      ).catch(() => {});
+    }
+
+    return { authorized: false, name: user.name, serialNo, reason: denyMsg, deviceId, deviceName };
+  }
+
+  logEvent('success', `[${deviceName}] Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`);
 
   // Notificar a la pantalla de feedback que la credencial fue leída y el alumno identificado,
   // indicando que se está esperando la respuesta de la API externa
-  broadcastVerifying(user.name, user.user_id, eventType);
+  broadcastVerifying(user.name, user.user_id, eventType, deviceId, deviceName);
 
-  // Query para la API externa del usuario
-  logEvent('info', `Llamando a la API externa de validación...`);
+  // 4. Query para la API externa del usuario
+  logEvent('info', `[${deviceName}] Llamando a la API externa de validación...`);
   let authorized = false;
   let apiResponse = null;
 
@@ -287,53 +351,51 @@ async function executeAccessValidation(reqInfo, clientIp) {
     apiResponse = { error: apiErr.message };
   }
 
-  // Log
+  // 5. Log de Veredicto
   if (authorized) {
-    logEvent('success', `ACCESO AUTORIZADO para el usuario ${user.name} (ID: ${userId})`);
+    logEvent('success', `[${deviceName}] ACCESO AUTORIZADO para ${user.name} (ID: ${userId})`);
   } else {
-    logEvent('warning', `ACCESO DENEGADO para el usuario ${user.name} (ID: ${userId})`);
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO para ${user.name} (ID: ${userId})`);
   }
 
-  // Trigger la puerta se abre si está autorizado y la configuración lo permite
-  let doorOpened = false;
-  const settings = await dbHelper.getSettings();
-  
-  // Notificar confirmación RemoteCheck al hardware Hikvision para que la pantalla del lector muestre "Verificado"
-  if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
+  // 6. Enviar confirmación RemoteCheck al hardware específico Hikvision
+  if (serialNo && device && device.ip && device.username && device.password) {
     deviceHelper.sendRemoteCheck(
-      settings.device_ip,
-      settings.device_port,
-      settings.device_user,
-      settings.device_password,
+      device.ip,
+      device.port || 80,
+      device.username,
+      device.password,
       serialNo,
       authorized
-    ).catch(e => console.warn('[Device API] Error enviando confirmación RemoteCheck:', e.message));
+    ).catch(e => console.warn(`[Device API - ${deviceName}] Error enviando confirmación RemoteCheck:`, e.message));
   }
-  
-  if (authorized && settings.enable_device_api_open === 'true') {
-    logEvent('info', `Iniciando apertura remota de puerta en el dispositivo...`);
+
+  // 7. Apertura remota de puerta si está autorizado y habilitado en la configuración del torniquete
+  let doorOpened = false;
+  if (authorized && device && (device.enable_api_open === 1 || device.enable_api_open === true || String(device.enable_api_open) === 'true')) {
+    logEvent('info', `[${deviceName}] Iniciando apertura remota de puerta...`);
     const openResult = await deviceHelper.openDoor(
-      settings.device_ip,
-      settings.device_port,
-      settings.device_user,
-      settings.device_password,
-      settings.device_door_channel
+      device.ip,
+      device.port || 80,
+      device.username,
+      device.password,
+      device.door_channel || 1
     );
 
     if (openResult.success) {
-      logEvent('success', `Puerta abierta exitosamente por API en dispositivo.`);
+      logEvent('success', `[${deviceName}] Puerta abierta exitosamente por API.`);
       doorOpened = true;
     } else {
-      logEvent('error', `Fallo al abrir la puerta por API: ${openResult.error || 'Respuesta inesperada'}`);
+      logEvent('error', `[${deviceName}] Fallo al abrir la puerta por API: ${openResult.error || 'Respuesta inesperada'}`);
     }
   } else if (authorized) {
-    logEvent('info', `Apertura por API de dispositivo omitida (está desactivada o requiere respuesta HTTP directa).`);
+    logEvent('info', `[${deviceName}] Apertura por API de dispositivo omitida (está desactivada o requiere respuesta HTTP directa).`);
   }
 
-  // Log DB
-  await dbHelper.addLog(userId, user.name, eventType, user.api_url, apiResponse, authorized, doorOpened);
+  // 8. Guardar log en SQLite con los datos del torniquete
+  await dbHelper.addLog(userId, user.name, eventType, user.api_url, apiResponse, authorized, doorOpened, deviceId, deviceName, deviceIp);
 
-  // Determinar la razon de denegacion y la retroalimentacion de la pantalla de feedback
+  // 9. Determinar razón y enviar feedback visual
   let denyReason = 'Acceso Autorizado';
   if (!authorized) {
     if (apiResponse && apiResponse.message) {
@@ -345,10 +407,9 @@ async function executeAccessValidation(reqInfo, clientIp) {
     }
   }
 
-  // Envia el Feedback
-  broadcastFeedback(authorized, user.name, userId, denyReason);
+  broadcastFeedback(authorized, user.name, userId, denyReason, deviceId, deviceName);
 
-  return { authorized, name: user.name, serialNo, doorOpened, reason: denyReason };
+  return { authorized, name: user.name, serialNo, doorOpened, reason: denyReason, deviceId, deviceName };
 }
 
 /**
@@ -364,24 +425,27 @@ async function processAccessRequest(reqInfo, clientIp) {
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
-  logEvent('info', `=== Solicitud de acceso: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`);
+  const formattedIp = cleanIPv4(clientIp);
+  let device = await dbHelper.getDeviceByIp(formattedIp);
+  if (!device) device = await dbHelper.getDefaultDevice();
+  const deviceName = device ? device.name : 'Torniquete';
+
+  logEvent('info', `=== Solicitud de acceso [${deviceName}]: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`);
 
   const cleanUserId = String(userId).trim();
 
-  // 1. Deduplicación concurrente: Si ya hay una validación ejecutándose en este mismo instante para este alumno,
-  // reutilizamos la misma promesa para no saturar la API externa ni generar bloqueos de concurrencia
+  // 1. Deduplicación concurrente
   if (inFlightRequests.has(cleanUserId)) {
     logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`);
     try {
       const inFlightResult = await inFlightRequests.get(cleanUserId);
       if (serialNo && serialNo !== inFlightResult.serialNo) {
-        const settings = await dbHelper.getSettings();
-        if (settings.device_ip && settings.device_user && settings.device_password) {
+        if (device && device.ip && device.username && device.password) {
           deviceHelper.sendRemoteCheck(
-            settings.device_ip,
-            settings.device_port,
-            settings.device_user,
-            settings.device_password,
+            device.ip,
+            device.port || 80,
+            device.username,
+            device.password,
             serialNo,
             inFlightResult.authorized
           ).catch(() => {});
@@ -391,19 +455,17 @@ async function processAccessRequest(reqInfo, clientIp) {
     } catch (_) {}
   }
 
-  // 2. Cooldown anti-rebote: Si ya se autorizó este alumno hace menos de 2.5 segundos,
-  // devolvemos el resultado autorizado sin volver a disparar la API externa ni duplicar apertura en el torniquete
+  // 2. Cooldown anti-rebote: Si ya se autorizó este alumno hace menos de 2.5 segundos
   if (recentVerifications.has(cleanUserId)) {
     const recent = recentVerifications.get(cleanUserId);
     if (recent.result && recent.result.authorized && (Date.now() - recent.timestamp < 2500)) {
       logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`);
-      const settings = await dbHelper.getSettings();
-      if (serialNo && settings.device_ip && settings.device_user && settings.device_password) {
+      if (serialNo && device && device.ip && device.username && device.password) {
         deviceHelper.sendRemoteCheck(
-          settings.device_ip,
-          settings.device_port,
-          settings.device_user,
-          settings.device_password,
+          device.ip,
+          device.port || 80,
+          device.username,
+          device.password,
           serialNo,
           recent.result.authorized
         ).catch(() => {});
@@ -426,6 +488,7 @@ async function processAccessRequest(reqInfo, clientIp) {
     inFlightRequests.delete(cleanUserId);
   }
 }
+
 
 /**
  * Handle en el dispositivo Hikvision

@@ -8,28 +8,60 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // API base endpoints
+  const API_ME = '/api/me';
   const API_USERS = '/api/users';
+  const API_DEVICES = '/api/devices';
   const API_LOGS = '/api/logs';
   const API_SETTINGS = '/api/settings';
-  const API_TEST_SCAN = '/api/test-scan';
-  const API_TEST_OPEN = '/api/test-open-door';
   const API_CLEAR_LOGS = '/api/logs/clear';
+  const API_RECEPTIONISTS = '/api/receptionists';
 
   // State
+  let currentUser = null;
   let usersList = [];
+  let devicesList = [];
   let logsList = [];
+  let receptionistsList = [];
+
+  // Current User Badge
+  const currentUserBadge = document.getElementById('current-user-badge');
+  const currentUserName = document.getElementById('current-user-name');
 
   // Dom Elements
   const consoleLogs = document.getElementById('console-logs');
   const btnClearConsole = document.getElementById('btn-clear-console');
-  
-  const simUserIdSelect = document.getElementById('sim-user-id');
-  const btnSimulateScan = document.getElementById('btn-simulate-scan');
-  const btnTestOpen = document.getElementById('btn-test-open');
-  
-  const deviceForm = document.getElementById('device-settings-form');
-  const btnSaveSettings = document.getElementById('btn-save-settings');
-  
+
+  // Devices Elements
+  const devicesContainer = document.getElementById('devices-container');
+  const btnShowAddDevice = document.getElementById('btn-show-add-device');
+  const deviceFormContainer = document.getElementById('device-form-container');
+  const deviceFormTitle = document.getElementById('device-form-title');
+  const deviceForm = document.getElementById('device-form');
+  const deviceIdInput = document.getElementById('device-id');
+  const deviceNameInput = document.getElementById('device-name');
+  const deviceIpInput = document.getElementById('device-ip');
+  const devicePortInput = document.getElementById('device-port');
+  const deviceDoorInput = document.getElementById('device-door');
+  const deviceUserInput = document.getElementById('device-user');
+  const devicePasswordInput = document.getElementById('device-password');
+  const deviceEnableOpenInput = document.getElementById('device-enable-api-open');
+  const deviceIsDefaultInput = document.getElementById('device-is-default');
+  const btnCancelDevice = document.getElementById('btn-cancel-device');
+
+  // Receptionists Elements
+  const btnShowAddReceptionist = document.getElementById('btn-show-add-receptionist');
+  const receptionistFormContainer = document.getElementById('receptionist-form-container');
+  const receptionistFormTitle = document.getElementById('receptionist-form-title');
+  const receptionistForm = document.getElementById('receptionist-form');
+  const receptionistIdInput = document.getElementById('receptionist-id');
+  const receptionistNameInput = document.getElementById('receptionist-name');
+  const receptionistUsernameInput = document.getElementById('receptionist-username');
+  const receptionistPasswordInput = document.getElementById('receptionist-password');
+  const receptionistConfirmPasswordInput = document.getElementById('receptionist-confirm-password');
+  const btnCancelReceptionist = document.getElementById('btn-cancel-receptionist');
+  const receptionistsListBody = document.getElementById('receptionists-list-body');
+
+  // Users Form & Table Elements
   const btnShowAddUser = document.getElementById('btn-show-add-user');
   const userFormContainer = document.getElementById('user-form-container');
   const userFormTitle = document.getElementById('user-form-title');
@@ -39,11 +71,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const userIdPreview = document.getElementById('user-id-preview');
   const userNameInput = document.getElementById('user-name');
   const userApiUrlInput = document.getElementById('user-api-url');
+  const userDeviceSelect = document.getElementById('user-device-select');
+  const userAssignAllCheckbox = document.getElementById('user-assign-all');
   const btnCancelUser = document.getElementById('btn-cancel-user');
-  
+  const filterUserDevice = document.getElementById('filter-user-device');
   const usersTableBody = document.querySelector('#users-table tbody');
+
+  // Logs Elements
+  const filterLogDevice = document.getElementById('filter-log-device');
   const logsTableBody = document.querySelector('#logs-table tbody');
   const btnClearDbLogs = document.getElementById('btn-clear-db-logs');
+
+  // Admin Security Settings
+  const btnSaveAdminPassword = document.getElementById('btn-save-admin-password');
+  const settingAdminPassword = document.getElementById('setting-admin-password');
   const btnLogout = document.getElementById('btn-logout');
 
   // Metrics elements
@@ -76,13 +117,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Clear UI console logs
-  btnClearConsole.addEventListener('click', () => {
-    consoleLogs.innerHTML = '';
-    appendConsoleLog('info', 'Consola limpia. Esperando nuevos eventos...');
-  });
+  if (btnClearConsole) {
+    btnClearConsole.addEventListener('click', () => {
+      consoleLogs.innerHTML = '';
+      appendConsoleLog('info', 'Consola limpia. Esperando nuevos eventos...');
+    });
+  }
 
   // ==========================================================================
   // SSE Event Stream Integration
+  // ==========================================================================
   let refreshLogsTimer = null;
   function debouncedRefreshLogs() {
     if (refreshLogsTimer) clearTimeout(refreshLogsTimer);
@@ -108,8 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
-    source.onerror = (err) => {
-      console.error('SSE connection lost. Reconnecting in 3s...', err);
+    source.onerror = () => {
       source.close();
       setTimeout(connectEventStream, 3000);
     };
@@ -118,27 +161,54 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Fetch Data Functions
   // ==========================================================================
+  async function refreshDevices() {
+    try {
+      const res = await fetch(API_DEVICES);
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      devicesList = await res.json();
+      renderDevicesList();
+      populateDeviceDropdowns();
+    } catch (err) {
+      console.error('Error fetching devices:', err);
+      appendConsoleLog('error', `Error al cargar lista de torniquetes: ${err.message}`);
+    }
+  }
+
   async function refreshUsers() {
     try {
-      const res = await fetch(`${API_USERS}?filter=production`);
+      const selectedDevId = filterUserDevice ? filterUserDevice.value : '';
+      let url = `${API_USERS}?filter=production`;
+      if (selectedDevId) {
+        url += `&deviceId=${encodeURIComponent(selectedDevId)}`;
+      }
+
+      const res = await fetch(url);
       if (res.status === 401) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
       usersList = await res.json();
       renderUsersTable();
-      populateSimulatorOptions();
     } catch (err) {
       console.error('Error fetching users:', err);
-      appendConsoleLog('error', `Error al cargar la base de datos de usuarios: ${err.message}`);
+      appendConsoleLog('error', `Error al consultar usuarios: ${err.message}`);
     }
   }
 
   async function refreshLogs() {
     try {
-      const res = await fetch(API_LOGS);
+      const selectedDevId = filterLogDevice ? filterLogDevice.value : '';
+      let url = API_LOGS;
+      if (selectedDevId) {
+        url += `?deviceId=${encodeURIComponent(selectedDevId)}`;
+      }
+
+      const res = await fetch(url);
       if (res.status === 401) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
       logsList = await res.json();
@@ -149,47 +219,333 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function refreshSettings() {
-    try {
-      const res = await fetch(API_SETTINGS);
-      if (res.status === 401) {
-        window.location.href = '/login.html';
-        return;
-      }
-      const settings = await res.json();
+  // ==========================================================================
+  // Devices Rendering & Handlers
+  // ==========================================================================
+  function renderDevicesList() {
+    if (!devicesContainer) return;
+    devicesContainer.innerHTML = '';
+
+    if (devicesList.length === 0) {
+      devicesContainer.innerHTML = `<div class="text-center text-muted" style="padding: 1rem;">No hay torniquetes registrados. Agregue uno con el botón superior.</div>`;
+      return;
+    }
+
+    devicesList.forEach(dev => {
+      const isDefault = dev.is_default === 1 || dev.is_default === true;
+      const defaultBadge = isDefault
+        ? `<span class="badge badge-primary" style="font-size: 0.7rem; padding: 0.15rem 0.45rem;">Predeterminado</span>`
+        : '';
       
-      document.getElementById('setting-device-ip').value = settings.device_ip || '';
-      document.getElementById('setting-device-port').value = settings.device_port || '';
-      document.getElementById('setting-device-user').value = settings.device_user || '';
-      document.getElementById('setting-device-password').value = settings.device_password || '';
-      document.getElementById('setting-device-door').value = settings.device_door_channel || '1';
-      document.getElementById('setting-enable-api-open').checked = settings.enable_device_api_open === 'true';
-    } catch (err) {
-      console.error('Error fetching settings:', err);
-      appendConsoleLog('error', `Error al cargar configuración del lector: ${err.message}`);
+      const devCard = document.createElement('div');
+      devCard.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;';
+      
+      devCard.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <strong style="font-size: 0.95rem; color: var(--text-main);">${escapeHTML(dev.name)}</strong>
+            ${defaultBadge}
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">
+            <span>IP: ${escapeHTML(dev.ip)}:${dev.port || 80}</span>
+            <span style="margin: 0 0.35rem;">•</span>
+            <span>Puerta: ${dev.door_channel || 1}</span>
+            <span style="margin: 0 0.35rem;">•</span>
+            <span style="color: ${dev.enable_api_open ? 'var(--success)' : 'var(--text-muted)'};">${dev.enable_api_open ? 'Apertura Remota ON' : 'Apertura OFF'}</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0;">
+          <button class="btn btn-secondary btn-sm test-ping-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete" style="padding: 0.35rem 0.6rem; font-size: 0.75rem;">
+            <i data-lucide="radio" style="width: 14px; height: 14px;"></i> Ping
+          </button>
+          <button class="btn btn-primary btn-sm test-open-btn" data-id="${dev.id}" title="Enviar comando de apertura a este torniquete" style="padding: 0.35rem 0.6rem; font-size: 0.75rem;">
+            <i data-lucide="unlock" style="width: 14px; height: 14px;"></i> Abrir
+          </button>
+          <button class="btn btn-icon-only edit-device-btn" data-id="${dev.id}" title="Editar torniquete">
+            <i data-lucide="edit" style="width: 14px; height: 14px;"></i>
+          </button>
+          <button class="btn btn-icon-only text-danger delete-device-btn" data-id="${dev.id}" title="Eliminar torniquete" ${devicesList.length <= 1 ? 'disabled style="opacity:0.3;"' : ''}>
+            <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+          </button>
+        </div>
+      `;
+
+      devicesContainer.appendChild(devCard);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+
+    // Attach device action listeners
+    document.querySelectorAll('.test-ping-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const dev = devicesList.find(d => String(d.id) === String(id));
+        const btnElem = e.currentTarget;
+        btnElem.disabled = true;
+        appendConsoleLog('info', `[Ping] Probando comunicación con ${dev ? dev.name : id} (${dev ? dev.ip : ''})...`);
+        try {
+          const res = await fetch(`/api/devices/${id}/test-ping`, { method: 'POST' });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            appendConsoleLog('success', `[Ping OK] ${data.message}`);
+            alert(`[Conexión Exitosa]\n${data.message}`);
+          } else {
+            appendConsoleLog('warning', `[Ping Fallo] ${data.error || data.message || 'Sin respuesta'}`);
+            alert(`[Fallo de Conexión]\n${data.error || data.message}`);
+          }
+        } catch (err) {
+          appendConsoleLog('error', `[Ping Error] Excepción: ${err.message}`);
+          alert(`Error al probar conexión: ${err.message}`);
+        } finally {
+          btnElem.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll('.test-open-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const dev = devicesList.find(d => String(d.id) === String(id));
+        const btnElem = e.currentTarget;
+        btnElem.disabled = true;
+        appendConsoleLog('info', `[Apertura] Enviando comando de apertura a "${dev ? dev.name : id}"...`);
+        try {
+          const res = await fetch(`/api/devices/${id}/open-door`, { method: 'POST' });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            appendConsoleLog('success', `[Apertura OK] Puerta abierta en ${dev ? dev.name : 'torniquete'}.`);
+          } else {
+            throw new Error(data.error || 'Respuesta inesperada');
+          }
+        } catch (err) {
+          appendConsoleLog('error', `[Apertura Error] Fallo al abrir ${dev ? dev.name : ''}: ${err.message}`);
+          alert(`Fallo al abrir puerta:\n${err.message}`);
+        } finally {
+          btnElem.disabled = false;
+        }
+      });
+    });
+
+    document.querySelectorAll('.edit-device-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const dev = devicesList.find(d => String(d.id) === String(id));
+        if (dev) showDeviceForm(dev);
+      });
+    });
+
+    document.querySelectorAll('.delete-device-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const dev = devicesList.find(d => String(d.id) === String(id));
+        if (dev && confirm(`¿Desea eliminar el torniquete "${dev.name}" (${dev.ip})? Los alumnos asignados a este torniquete mantendrán sus otros accesos.`)) {
+          appendConsoleLog('info', `Eliminando torniquete "${dev.name}"...`);
+          try {
+            const res = await fetch(`/api/devices/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+              appendConsoleLog('success', `Torniquete "${dev.name}" eliminado correctamente.`);
+              refreshDevices();
+              refreshUsers();
+            } else {
+              const data = await res.json();
+              throw new Error(data.error || 'Fallo al eliminar');
+            }
+          } catch (err) {
+            appendConsoleLog('error', `Error al eliminar torniquete: ${err.message}`);
+            alert(`Error: ${err.message}`);
+          }
+        }
+      });
+    });
+  }
+
+  function populateDeviceDropdowns() {
+    // 1. Selector en formulario de registro de usuario (Asignación habitual de 1 dispositivo)
+    if (userDeviceSelect) {
+      const currentSelected = userDeviceSelect.value;
+      userDeviceSelect.innerHTML = '';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = `${dev.name} (${dev.ip})`;
+        if (dev.is_default) {
+          opt.textContent += ' [Predeterminado]';
+          if (!currentSelected) opt.selected = true;
+        }
+        if (String(currentSelected) === String(dev.id)) {
+          opt.selected = true;
+        }
+        userDeviceSelect.appendChild(opt);
+      });
+    }
+
+    // 2. Filtro en tabla de usuarios
+    if (filterUserDevice) {
+      const currentVal = filterUserDevice.value;
+      filterUserDevice.innerHTML = '<option value="">Todos los Torniquetes</option>';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = dev.name;
+        if (String(currentVal) === String(dev.id)) opt.selected = true;
+        filterUserDevice.appendChild(opt);
+      });
+    }
+
+    // 3. Filtro en tabla de historial de logs
+    if (filterLogDevice) {
+      const currentVal = filterLogDevice.value;
+      filterLogDevice.innerHTML = '<option value="">Todos los Torniquetes</option>';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = dev.name;
+        if (String(currentVal) === String(dev.id)) opt.selected = true;
+        filterLogDevice.appendChild(opt);
+      });
     }
   }
 
+  function showDeviceForm(dev = null) {
+    if (!deviceFormContainer) return;
+    deviceFormContainer.classList.remove('hidden');
+    if (dev) {
+      deviceFormTitle.textContent = 'Editar Torniquete';
+      deviceIdInput.value = dev.id;
+      deviceNameInput.value = dev.name;
+      deviceIpInput.value = dev.ip;
+      devicePortInput.value = dev.port || 80;
+      deviceDoorInput.value = dev.door_channel || 1;
+      deviceUserInput.value = dev.username || 'admin';
+      devicePasswordInput.value = '';
+      devicePasswordInput.placeholder = '•••••••• (Dejar en blanco para conservar)';
+      deviceEnableOpenInput.checked = Boolean(dev.enable_api_open);
+      deviceIsDefaultInput.checked = Boolean(dev.is_default);
+    } else {
+      deviceFormTitle.textContent = 'Registrar Nuevo Torniquete';
+      deviceForm.reset();
+      deviceIdInput.value = '';
+      devicePortInput.value = '80';
+      deviceDoorInput.value = '1';
+      deviceUserInput.value = 'admin';
+      devicePasswordInput.placeholder = '••••••••';
+      deviceEnableOpenInput.checked = true;
+      deviceIsDefaultInput.checked = devicesList.length === 0;
+    }
+  }
+
+  function hideDeviceForm() {
+    if (!deviceFormContainer) return;
+    deviceFormContainer.classList.add('hidden');
+    deviceForm.reset();
+    deviceIdInput.value = '';
+  }
+
+  if (btnShowAddDevice) btnShowAddDevice.addEventListener('click', () => showDeviceForm());
+  if (btnCancelDevice) btnCancelDevice.addEventListener('click', () => hideDeviceForm());
+
+  if (deviceForm) {
+    deviceForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const devId = deviceIdInput.value;
+      const isEdit = Boolean(devId);
+
+      const payload = {
+        name: deviceNameInput.value.trim(),
+        ip: deviceIpInput.value.trim(),
+        port: parseInt(devicePortInput.value || 80, 10),
+        door_channel: parseInt(deviceDoorInput.value || 1, 10),
+        username: deviceUserInput.value.trim() || 'admin',
+        enable_api_open: deviceEnableOpenInput.checked,
+        is_default: deviceIsDefaultInput.checked
+      };
+
+      if (devicePasswordInput.value.trim() !== '') {
+        payload.password = devicePasswordInput.value.trim();
+      }
+
+      const url = isEdit ? `/api/devices/${devId}` : API_DEVICES;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      appendConsoleLog('info', `${isEdit ? 'Actualizando' : 'Creando'} torniquete "${payload.name}" (${payload.ip})...`);
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          appendConsoleLog('success', `Torniquete "${payload.name}" guardado exitosamente.`);
+          hideDeviceForm();
+          refreshDevices();
+          refreshUsers();
+        } else {
+          throw new Error(data.error || 'Error al guardar torniquete');
+        }
+      } catch (err) {
+        appendConsoleLog('error', `Error al guardar torniquete: ${err.message}`);
+        alert(`Error: ${err.message}`);
+      }
+    });
+  }
+
+
+
   // ==========================================================================
-  // Rendering Functions
+  // Users Rendering & Handlers
   // ==========================================================================
+  if (filterUserDevice) {
+    filterUserDevice.addEventListener('change', () => refreshUsers());
+  }
+
+  if (filterLogDevice) {
+    filterLogDevice.addEventListener('change', () => refreshLogs());
+  }
+
+  // Toggle habitual single device select when "Asignar a todos" is checked
+  if (userAssignAllCheckbox && userDeviceSelect) {
+    userAssignAllCheckbox.addEventListener('change', () => {
+      userDeviceSelect.disabled = userAssignAllCheckbox.checked;
+      if (userAssignAllCheckbox.checked) {
+        userDeviceSelect.style.opacity = '0.5';
+      } else {
+        userDeviceSelect.style.opacity = '1';
+      }
+    });
+  }
+
   function renderUsersTable() {
     usersTableBody.innerHTML = '';
     
     if (usersList.length === 0) {
-      usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No hay usuarios registrados.</td></tr>`;
+      usersTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No hay usuarios registrados.</td></tr>`;
       return;
     }
 
     usersList.forEach(user => {
+      let devicesBadge = '';
+      if (user.device_names && user.device_names.length > 0) {
+        if (user.device_names.length === devicesList.length && devicesList.length > 1) {
+          devicesBadge = `<span class="badge badge-primary" style="font-size:0.75rem;">Todos los Torniquetes (${user.device_names.length})</span>`;
+        } else {
+          devicesBadge = user.device_names.map(name => `<span class="badge badge-info" style="font-size:0.75rem; margin-right: 0.2rem;">${escapeHTML(name)}</span>`).join('');
+        }
+      } else {
+        devicesBadge = `<span class="badge badge-secondary" style="font-size:0.75rem;">Predeterminado</span>`;
+      }
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${escapeHTML(user.user_id)}</strong></td>
         <td>${escapeHTML(user.name)}</td>
+        <td>${devicesBadge}</td>
         <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${user.api_url ? escapeHTML(user.api_url) : '<span style="font-style:italic; opacity:0.6;">Sin URL</span>'}</span></td>
         <td class="actions-col">
           <div class="action-btn-group">
-            <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Código QR">
+            <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Credencial / Código QR">
               <i data-lucide="qr-code"></i>
             </button>
             <button class="btn btn-icon-only edit-user-btn" data-id="${user.id}" title="Editar">
@@ -204,11 +560,9 @@ document.addEventListener('DOMContentLoaded', () => {
       usersTableBody.appendChild(tr);
     });
 
-    // Re-trigger icon rendering
     if (window.lucide) window.lucide.createIcons();
 
     // Attach Event Listeners to actions
-
     document.querySelectorAll('.qr-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
@@ -229,7 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', async (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
         const user = usersList.find(u => u.id === id);
-        if (user && confirm(`¿Está seguro de eliminar al usuario ${user.name} de la base de datos local y del biométrico MinMoe?`)) {
+        if (user && confirm(`¿Está seguro de eliminar al usuario ${user.name} de la base de datos local y de sus torniquetes asignados?`)) {
           appendConsoleLog('info', `Eliminando a "${user.name}" (ID: ${user.user_id})...`);
           try {
             const res = await fetch(`${API_USERS}/${id}`, { method: 'DELETE' });
@@ -277,6 +631,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'simulated_scan': '<span class="badge badge-info">Simulado</span>',
         'card': '<span class="badge badge-success">Tarjeta</span>',
         'face': '<span class="badge badge-primary">Rostro</span>',
+        'qrCode': '<span class="badge badge-primary">QR</span>',
+        'remote_open': '<span class="badge badge-warning">Remoto</span>',
         'heartBeat': '<span class="badge badge-warning">Latido</span>',
         'unknown': '<span class="badge badge-secondary">Desconocido</span>'
       };
@@ -302,12 +658,28 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
           friendlyResponse = log.api_response;
         }
+
+        // Sanitizar si contiene HTML o etiquetas para no deformar la tabla
+        if (typeof friendlyResponse === 'string') {
+          if (friendlyResponse.includes('<html') || friendlyResponse.includes('<!DOCTYPE') || friendlyResponse.includes('<head')) {
+            const titleMatch = friendlyResponse.match(/<title[^>]*>([^<]+)<\/title>/i);
+            friendlyResponse = titleMatch ? `[Error HTML] ${titleMatch[1].trim()}` : '[Respuesta HTML no válida]';
+          }
+          if (friendlyResponse.length > 70) {
+            friendlyResponse = friendlyResponse.slice(0, 67) + '...';
+          }
+        }
       }
+
+      const deviceLabel = log.device_name 
+        ? `<strong style="font-size:0.8rem;">${escapeHTML(log.device_name)}</strong><br><small class="text-muted" style="font-size:0.7rem;">${escapeHTML(log.device_ip || '')}</small>`
+        : `<span class="text-muted" style="font-size:0.8rem;">${escapeHTML(log.device_ip || 'N/A')}</span>`;
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${timeString}</td>
         <td><strong>${escapeHTML(log.user_id || 'N/A')}</strong><br><small class="text-muted">${escapeHTML(log.name || 'Desconocido')}</small></td>
+        <td>${deviceLabel}</td>
         <td>${badgeType}</td>
         <td><span class="text-muted" style="font-size:0.75rem; word-break:break-all;">${escapeHTML(log.api_url || 'N/A')}</span></td>
         <td><span class="text-muted" style="font-size:0.75rem; word-break:break-word;">${escapeHTML(friendlyResponse)}</span></td>
@@ -317,18 +689,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (window.lucide) window.lucide.createIcons();
-  }
-
-  function populateSimulatorOptions() {
-    if (!simUserIdSelect) return;
-    simUserIdSelect.innerHTML = `<option value="">-- Cargar usuarios del sistema --</option>`;
-    
-    usersList.forEach(user => {
-      const opt = document.createElement('option');
-      opt.value = user.user_id;
-      opt.textContent = `${user.user_id} - ${user.name}`;
-      simUserIdSelect.appendChild(opt);
-    });
   }
 
   function updateMetrics() {
@@ -400,12 +760,43 @@ document.addEventListener('DOMContentLoaded', () => {
       userIdInput.value = user.user_id;
       userNameInput.value = user.name;
       userApiUrlInput.value = user.api_url;
+
+      // Asignación de torniquetes
+      const userDevs = user.device_ids || [];
+      const hasAll = devicesList.length > 1 && userDevs.length === devicesList.length;
+      if (userAssignAllCheckbox) {
+        userAssignAllCheckbox.checked = hasAll;
+      }
+      if (userDeviceSelect) {
+        userDeviceSelect.disabled = hasAll;
+        userDeviceSelect.style.opacity = hasAll ? '0.5' : '1';
+        if (userDevs.length > 0) {
+          userDeviceSelect.value = userDevs[0];
+        }
+      }
+
       updateUserIdPreview();
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Usuario';
       userForm.reset();
       userDbIdInput.value = '';
       userIdInput.value = '';
+
+      // Habitual: por defecto a un solo torniquete (predeterminado)
+      if (userAssignAllCheckbox) {
+        userAssignAllCheckbox.checked = false;
+      }
+      if (userDeviceSelect) {
+        userDeviceSelect.disabled = false;
+        userDeviceSelect.style.opacity = '1';
+        const defaultDev = devicesList.find(d => d.is_default);
+        if (defaultDev) {
+          userDeviceSelect.value = defaultDev.id;
+        } else if (devicesList.length > 0) {
+          userDeviceSelect.value = devicesList[0].id;
+        }
+      }
+
       updateUserIdPreview();
     }
   }
@@ -435,10 +826,15 @@ document.addEventListener('DOMContentLoaded', () => {
       finalUserId = extractIdFromUrl(apiUrlValue);
     }
 
+    const assignAll = userAssignAllCheckbox ? userAssignAllCheckbox.checked : false;
+    const selectedDeviceId = userDeviceSelect ? parseInt(userDeviceSelect.value, 10) : null;
+
     const payload = {
       user_id: finalUserId,
       name: userNameInput.value.trim(),
-      api_url: apiUrlValue
+      api_url: apiUrlValue,
+      assign_all: assignAll,
+      device_ids: (!assignAll && selectedDeviceId) ? [selectedDeviceId] : []
     };
 
     const isEdit = dbId !== '';
@@ -493,116 +889,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Settings Submission
-  btnSaveSettings.addEventListener('click', async () => {
-    const data = {
-      device_ip: document.getElementById('setting-device-ip').value.trim(),
-      device_port: document.getElementById('setting-device-port').value.trim(),
-      device_user: document.getElementById('setting-device-user').value.trim(),
-      device_door_channel: document.getElementById('setting-device-door').value.trim(),
-      enable_device_api_open: document.getElementById('setting-enable-api-open').checked ? 'true' : 'false'
-    };
-
-    const devicePasswordInput = document.getElementById('setting-device-password');
-    if (devicePasswordInput && devicePasswordInput.value.trim() !== '') {
-      data.device_password = devicePasswordInput.value;
-    }
-
-    const adminPasswordInput = document.getElementById('setting-admin-password');
-    if (adminPasswordInput && adminPasswordInput.value.trim() !== '') {
-      data.admin_password = adminPasswordInput.value;
-    }
-
-    try {
-      const res = await fetch(API_SETTINGS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      
-      if (res.ok) {
-        appendConsoleLog('success', 'Configuración de dispositivo y acceso guardada correctamente.');
-        if (adminPasswordInput) adminPasswordInput.value = '';
-        refreshSettings();
-      } else {
-        throw new Error('Fallo al guardar configuración.');
+  // Admin Password Update
+  if (btnSaveAdminPassword && settingAdminPassword) {
+    btnSaveAdminPassword.addEventListener('click', async () => {
+      const newPass = settingAdminPassword.value.trim();
+      if (!newPass) {
+        alert('Ingrese una nueva contraseña para actualizar.');
+        return;
       }
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    }
-  });
 
-  // ==========================================================================
-  // Simulator Controls
-  // ==========================================================================
-  if (btnSimulateScan && simUserIdSelect) {
-    btnSimulateScan.addEventListener('click', async () => {
-      const val = simUserIdSelect.value;
-      if (!val) {
-        // Allow custom typing of an ID for simulation
-        const customId = prompt("Ingrese un ID de usuario a simular (ej. 1001 o uno no registrado):");
-        if (!customId) return;
-        triggerSimulation(customId.trim());
-      } else {
-        triggerSimulation(val);
-      }
-    });
-  }
-
-  async function triggerSimulation(userId) {
-    try {
-      appendConsoleLog('info', `Enviando simulación para ID: ${userId}...`);
-      const res = await fetch(API_TEST_SCAN, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, eventType: 'simulated_scan' })
-      });
-      
-      const result = await res.json();
-      if (res.ok) {
-        if (result.authorized) {
-          appendConsoleLog('success', `Simulación exitosa: Acceso AUTORIZADO para ${result.name}.`);
-        } else {
-          appendConsoleLog('warning', `Simulación exitosa: Acceso DENEGADO. Razón: ${result.reason || 'Sin detalles'}`);
-        }
-      } else {
-        throw new Error(result.error || 'Error de simulación');
-      }
-    } catch (err) {
-      appendConsoleLog('error', `Error durante la simulación: ${err.message}`);
-    }
-  }
-
-  // Direct Door Open Test
-  if (btnTestOpen) {
-    btnTestOpen.addEventListener('click', async () => {
-      btnTestOpen.disabled = true;
-      appendConsoleLog('info', 'Enviando comando manual de apertura al dispositivo...');
       try {
-        const res = await fetch(API_TEST_OPEN, { method: 'POST' });
-        const data = await res.json();
-        
-        if (res.ok && data.success) {
-          appendConsoleLog('success', 'Comando de apertura ejecutado. El dispositivo respondió OK.');
+        const res = await fetch(API_SETTINGS, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ admin_password: newPass })
+        });
+        if (res.ok) {
+          appendConsoleLog('success', 'Contraseña de administrador actualizada correctamente.');
+          settingAdminPassword.value = '';
+          alert('Contraseña de administrador actualizada con éxito.');
         } else {
-          throw new Error(data.error || 'Respuesta errónea del dispositivo');
+          throw new Error('Fallo al actualizar contraseña');
         }
       } catch (err) {
-        appendConsoleLog('error', `Error al abrir la puerta: ${err.message}`);
-        alert(`Fallo en hardware: ${err.message}. Revise IP y contraseña de red del dispositivo en la sección inferior.`);
-      } finally {
-        btnTestOpen.disabled = false;
+        alert(`Error: ${err.message}`);
       }
     });
   }
 
-  // Clear Database Access Logs History
+  // Clear Database Access Logs History (supports filter)
   btnClearDbLogs.addEventListener('click', async () => {
-    if (confirm('¿Está seguro de borrar todo el historial de accesos de la base de datos?')) {
+    const selectedDevId = filterLogDevice ? filterLogDevice.value : '';
+    const confirmMsg = selectedDevId
+      ? '¿Está seguro de borrar los registros de este torniquete en la base de datos?'
+      : '¿Está seguro de borrar todo el historial de accesos de la base de datos?';
+
+    if (confirm(confirmMsg)) {
       try {
-        const res = await fetch(API_CLEAR_LOGS, { method: 'POST' });
+        let url = API_CLEAR_LOGS;
+        if (selectedDevId) url += `?deviceId=${encodeURIComponent(selectedDevId)}`;
+        const res = await fetch(url, { method: 'POST' });
         if (res.ok) {
-          appendConsoleLog('info', 'Historial de registros limpiado en base de datos.');
+          appendConsoleLog('info', 'Historial de registros limpiado.');
           refreshLogs();
         } else {
           throw new Error('Fallo al limpiar');
@@ -620,13 +948,227 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await fetch('/api/logout', { method: 'POST' });
           if (res.ok) {
-            window.location.href = '/login.html';
+            window.location.href = '/login';
           } else {
             alert('Error al cerrar sesión');
           }
         } catch (err) {
           alert('Error al conectar con el servidor');
         }
+      }
+    });
+  }
+
+  // ==========================================================================
+  // Current User & Session Info
+  // ==========================================================================
+  async function fetchCurrentUser() {
+    try {
+      const res = await fetch(API_ME);
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return null;
+      }
+      const data = await res.json();
+      currentUser = data.user || { role: 'admin', name: 'Administrador' };
+
+      if (currentUserName) {
+        if (currentUser.role === 'admin') {
+          currentUserName.textContent = 'Administrador';
+        } else {
+          currentUserName.textContent = `${currentUser.name} (Recepcionista)`;
+        }
+      }
+
+      // Hide or show admin-only elements depending on role
+      const adminElements = document.querySelectorAll('.admin-only');
+      if (currentUser.role === 'receptionist') {
+        adminElements.forEach(el => el.style.display = 'none');
+      } else {
+        adminElements.forEach(el => el.style.display = '');
+        refreshReceptionists();
+      }
+      return currentUser;
+    } catch (err) {
+      console.error('Error fetching current user:', err);
+      return null;
+    }
+  }
+
+  // ==========================================================================
+  // Receptionists Management (Admin only)
+  // ==========================================================================
+  async function refreshReceptionists() {
+    if (!receptionistsListBody) return;
+    try {
+      const res = await fetch(API_RECEPTIONISTS);
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (res.status === 403) return;
+
+      receptionistsList = await res.json();
+      renderReceptionistsTable();
+    } catch (err) {
+      console.error('Error fetching receptionists:', err);
+    }
+  }
+
+  function renderReceptionistsTable() {
+    if (!receptionistsListBody) return;
+    receptionistsListBody.innerHTML = '';
+
+    if (!receptionistsList || receptionistsList.length === 0) {
+      receptionistsListBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted" style="padding: 1rem;">No hay recepcionistas registrados.</td></tr>`;
+      return;
+    }
+
+    receptionistsList.forEach(rec => {
+      const tr = document.createElement('tr');
+      const formattedDate = rec.created_at ? new Date(rec.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+      tr.innerHTML = `
+        <td><strong>${escapeHTML(rec.name)}</strong></td>
+        <td><span class="badge badge-info" style="font-size:0.75rem;">@${escapeHTML(rec.username)}</span></td>
+        <td><span class="text-muted" style="font-size:0.8rem;">${formattedDate}</span></td>
+        <td class="actions-col">
+          <div class="action-btn-group">
+            <button class="btn btn-icon-only edit-receptionist-btn" data-id="${rec.id}" title="Editar Recepcionista">
+              <i data-lucide="edit"></i>
+            </button>
+            <button class="btn btn-icon-only text-danger delete-receptionist-btn" data-id="${rec.id}" title="Eliminar Recepcionista">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </td>
+      `;
+      receptionistsListBody.appendChild(tr);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+
+    // Attach listeners
+    document.querySelectorAll('.edit-receptionist-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = parseInt(e.currentTarget.getAttribute('data-id'), 10);
+        const rec = receptionistsList.find(r => r.id === id);
+        if (rec) showReceptionistForm(rec);
+      });
+    });
+
+    document.querySelectorAll('.delete-receptionist-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = parseInt(e.currentTarget.getAttribute('data-id'), 10);
+        const rec = receptionistsList.find(r => r.id === id);
+        if (rec && confirm(`¿Está seguro de eliminar al recepcionista "${rec.name}" (@${rec.username})?`)) {
+          try {
+            const res = await fetch(`${API_RECEPTIONISTS}/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+              appendConsoleLog('info', `[RECEPCIONISTA] Recepcionista "${rec.name}" eliminado.`);
+              refreshReceptionists();
+            } else {
+              const data = await res.json();
+              alert(data.error || 'Error al eliminar recepcionista');
+            }
+          } catch (err) {
+            alert(`Error: ${err.message}`);
+          }
+        }
+      });
+    });
+  }
+
+  function showReceptionistForm(rec = null) {
+    if (!receptionistFormContainer) return;
+    receptionistForm.reset();
+    if (rec) {
+      receptionistFormTitle.textContent = 'Editar Recepcionista';
+      receptionistIdInput.value = rec.id;
+      receptionistNameInput.value = rec.name;
+      receptionistUsernameInput.value = rec.username;
+      receptionistPasswordInput.required = false;
+      receptionistConfirmPasswordInput.required = false;
+      receptionistPasswordInput.placeholder = 'Dejar vacío para conservar actual';
+      receptionistConfirmPasswordInput.placeholder = 'Dejar vacío para conservar actual';
+    } else {
+      receptionistFormTitle.textContent = 'Dar de Alta Recepcionista';
+      receptionistIdInput.value = '';
+      receptionistPasswordInput.required = true;
+      receptionistConfirmPasswordInput.required = true;
+      receptionistPasswordInput.placeholder = '••••••••';
+      receptionistConfirmPasswordInput.placeholder = '••••••••';
+    }
+    receptionistFormContainer.classList.remove('hidden');
+    receptionistNameInput.focus();
+  }
+
+  function hideReceptionistForm() {
+    if (!receptionistFormContainer) return;
+    receptionistFormContainer.classList.add('hidden');
+    receptionistForm.reset();
+    receptionistIdInput.value = '';
+  }
+
+  if (btnShowAddReceptionist) {
+    btnShowAddReceptionist.addEventListener('click', () => showReceptionistForm());
+  }
+
+  if (btnCancelReceptionist) {
+    btnCancelReceptionist.addEventListener('click', () => hideReceptionistForm());
+  }
+
+  if (receptionistForm) {
+    receptionistForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = receptionistIdInput.value;
+      const name = receptionistNameInput.value.trim();
+      const username = receptionistUsernameInput.value.trim();
+      const password = receptionistPasswordInput.value;
+      const confirmPassword = receptionistConfirmPasswordInput.value;
+
+      if (password || confirmPassword || !id) {
+        if (password !== confirmPassword) {
+          alert('La contraseña y la confirmación no coinciden.');
+          receptionistConfirmPasswordInput.focus();
+          return;
+        }
+        if (!id && password.length < 4) {
+          alert('La contraseña debe tener al menos 4 caracteres.');
+          receptionistPasswordInput.focus();
+          return;
+        }
+      }
+
+      const isEdit = id !== '';
+      const url = isEdit ? `${API_RECEPTIONISTS}/${id}` : API_RECEPTIONISTS;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const payload = {
+        name,
+        username,
+        password,
+        confirm_password: confirmPassword
+      };
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          appendConsoleLog('success', `[RECEPCIONISTA] Recepcionista "${name}" guardado correctamente.`);
+          alert(`Recepcionista "${name}" guardado con éxito.`);
+          hideReceptionistForm();
+          refreshReceptionists();
+        } else {
+          alert(`Error: ${data.error || 'No se pudo guardar el recepcionista'}`);
+        }
+      } catch (err) {
+        alert(`Error de red: ${err.message}`);
       }
     });
   }
@@ -1067,8 +1609,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Startup
   // ==========================================================================
+  fetchCurrentUser();
   connectEventStream();
+  refreshDevices();
   refreshUsers();
   refreshLogs();
-  refreshSettings();
 });
+
+

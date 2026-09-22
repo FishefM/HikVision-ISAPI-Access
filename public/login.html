@@ -35,7 +35,7 @@
                         radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 40%);
       background-attachment: fixed;
       color: var(--text-main);
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -44,7 +44,7 @@
 
     .login-container {
       width: 100%;
-      max-width: 420px;
+      max-width: 440px;
       background: var(--panel-bg);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
@@ -54,7 +54,7 @@
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
       display: flex;
       flex-direction: column;
-      gap: 2rem;
+      gap: 1.75rem;
       animation: fadeIn 0.6s ease-out;
     }
 
@@ -96,11 +96,11 @@
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.45rem;
     }
 
     label {
-      font-size: 0.875rem;
+      font-size: 0.85rem;
       font-weight: 500;
       color: var(--text-muted);
     }
@@ -120,12 +120,12 @@
 
     .form-input {
       width: 100%;
-      padding: 0.875rem 1rem 0.875rem 2.75rem;
-      background: rgba(0, 0, 0, 0.2);
+      padding: 0.85rem 1rem 0.85rem 2.75rem;
+      background: rgba(0, 0, 0, 0.25);
       border: 1px solid var(--border-color);
       border-radius: 10px;
       color: #ffffff;
-      font-size: 1rem;
+      font-size: 0.95rem;
       outline: none;
       transition: all 0.3s ease;
       font-family: inherit;
@@ -152,6 +152,7 @@
       gap: 0.5rem;
       transition: all 0.3s ease;
       box-shadow: 0 4px 15px var(--accent-blue-glow);
+      margin-top: 0.5rem;
     }
 
     .btn-submit:hover {
@@ -196,24 +197,32 @@
         <i data-lucide="shield-alert" style="width: 32px; height: 32px;"></i>
       </div>
       <h1 class="brand-title">Torniquete Link</h1>
-      <p class="brand-subtitle">Panel de Integración Hikvision • Iniciar Sesión</p>
+      <p class="brand-subtitle">Panel de Acceso • Iniciar Sesión</p>
     </div>
 
-    <form id="login-form" style="display: flex; flex-direction: column; gap: 1.5rem;">
+    <form id="login-form" style="display: flex; flex-direction: column; gap: 1.25rem;">
       <div class="error-msg" id="error-box">
         <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
-        <span id="error-text">Contraseña incorrecta</span>
+        <span id="error-text">Credenciales incorrectas</span>
       </div>
 
       <div class="form-group">
-        <label for="password">Contraseña de Administrador</label>
+        <label for="username">Usuario o Nombre</label>
         <div class="input-wrapper">
-          <i data-lucide="lock" class="input-icon" style="width: 18px; height: 18px;"></i>
-          <input type="password" id="password" class="form-input" required placeholder="Ingrese contraseña" autofocus>
+          <i data-lucide="user" class="input-icon" style="width: 18px; height: 18px;"></i>
+          <input type="text" id="username" class="form-input" placeholder="admin o nombre de recepcionista" autofocus>
         </div>
       </div>
 
-      <button type="submit" class="btn-submit">
+      <div class="form-group">
+        <label for="password">Contraseña</label>
+        <div class="input-wrapper">
+          <i data-lucide="lock" class="input-icon" style="width: 18px; height: 18px;"></i>
+          <input type="password" id="password" class="form-input" required placeholder="••••••••">
+        </div>
+      </div>
+
+      <button type="submit" class="btn-submit" id="btn-login-submit">
         <span>Ingresar al Panel</span>
         <i data-lucide="arrow-right" style="width: 18px; height: 18px;"></i>
       </button>
@@ -224,15 +233,19 @@
     lucide.createIcons();
 
     const form = document.getElementById('login-form');
+    const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
     const errorBox = document.getElementById('error-box');
     const errorText = document.getElementById('error-text');
+    const btnSubmit = document.getElementById('btn-login-submit');
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       
+      const username = usernameInput.value.trim();
       const password = passwordInput.value;
       errorBox.style.display = 'none';
+      btnSubmit.disabled = true;
 
       try {
         const response = await fetch('/api/login', {
@@ -240,13 +253,13 @@
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ username, password })
         });
 
         const data = await response.json();
 
         if (response.ok) {
-          // Redirect to main panel
+          // Redirigir al panel principal
           window.location.href = '/';
         } else {
           errorText.textContent = data.error || 'Error al iniciar sesión';
@@ -256,6 +269,8 @@
       } catch (err) {
         errorText.textContent = 'No se pudo conectar con el servidor';
         errorBox.style.display = 'flex';
+      } finally {
+        btnSubmit.disabled = false;
       }
     });
   </script>

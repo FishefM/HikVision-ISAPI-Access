@@ -52,11 +52,13 @@ function isTestUser(user) {
 
 /**
  * Obtiene usuarios registrados de la base de datos local SQLite,
- * con soporte para filtrar usuarios reales (producción) o de prueba.
+ * con soporte para filtrar usuarios reales (producción) o de prueba,
+ * y filtro opcional por ID de torniquete/dispositivo.
  */
 async function getUsers(req, res) {
   try {
-    const users = await dbHelper.getUsers();
+    const deviceId = req.query.deviceId || req.query.device_id;
+    const users = await dbHelper.getUsers(null, deviceId);
     const filter = req.query.filter;
     if (filter === 'test' || filter === 'pruebas') {
       return res.json(users.filter(u => isTestUser(u)));
@@ -71,12 +73,11 @@ async function getUsers(req, res) {
 }
 
 /**
- * Crea un nuevo usuario en la base de datos SQLite y sincroniza con el MinMoe.
- * Si no se proporciona un user_id, se calcula automáticamente con los primeros 8
- * caracteres del hash de la API externa (o se genera un identificador aleatorio de 8 dígitos).
+ * Crea un nuevo usuario en la base de datos SQLite y sincroniza con el(los) MinMoe asignado(s).
+ * Por defecto asigna a un solo torniquete (el seleccionado o default), con opción de asignar a todos.
  */
 async function addUser(req, res) {
-  let { user_id, name, api_url } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
@@ -100,12 +101,32 @@ async function addUser(req, res) {
     return res.status(400).json({ error: 'Falta el campo obligatorio Nombre del alumno.' });
   }
 
-  logEvent('info', `[DB] Intentando registrar alumno en SQLite: ID "${user_id}", Nombre: "${name}", API: "${api_url}"...`);
+  // Determinar dispositivos asignados (por defecto solo 1 torniquete, opcionalmente todos)
+  let targetDeviceIds = [];
+  const allDevices = await dbHelper.getDevices();
+
+  if (assign_all === true || assign_all === 'true') {
+    targetDeviceIds = allDevices.map(d => d.id);
+  } else if (device_ids && Array.isArray(device_ids) && device_ids.length > 0) {
+    targetDeviceIds = device_ids.map(Number).filter(Boolean);
+  } else if (device_id) {
+    targetDeviceIds = [Number(device_id)];
+  } else {
+    // Por defecto habitual: asignar al torniquete predeterminado (solo 1 dispositivo)
+    const defaultDev = await dbHelper.getDefaultDevice();
+    if (defaultDev) {
+      targetDeviceIds = [defaultDev.id];
+    } else if (allDevices.length > 0) {
+      targetDeviceIds = [allDevices[0].id];
+    }
+  }
+
+  logEvent('info', `[DB] Intentando registrar alumno en SQLite: ID "${user_id}", Nombre: "${name}", Torniquetes asignados: [${targetDeviceIds.join(', ')}]...`);
 
   let user = null;
   // Paso 1: Inserción en la base de datos local SQLite
   try {
-    user = await dbHelper.addUser(user_id, name, api_url);
+    user = await dbHelper.addUser(user_id, name, api_url, targetDeviceIds);
     logEvent('success', `[DB OK] Alumno guardado exitosamente en SQLite local (Registro ID: ${user.id}, User ID: "${user_id}").`);
   } catch (dbErr) {
     if (dbErr.message && dbErr.message.includes('UNIQUE')) {
@@ -126,37 +147,47 @@ async function addUser(req, res) {
     }
   }
 
-  // Paso 2: Sincronización con el hardware Hikvision MinMoe
-  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [] };
-  try {
-    const settings = await dbHelper.getSettings();
-    if (settings.device_ip && settings.device_user && settings.device_password) {
-      logEvent('info', `[MinMoe] Iniciando sincronización de "${name}" (${user_id}) con biométrico en ${settings.device_ip}:${settings.device_port || 80}...`);
-      
-      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, user);
+  // Paso 2: Sincronización con el hardware Hikvision MinMoe de cada torniquete asignado
+  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
+  const targetDevices = allDevices.filter(d => targetDeviceIds.includes(d.id));
 
-      if (deviceSyncResult.synced) {
-        logEvent('success', `[MinMoe OK] Alumno "${name}" sincronizado con éxito en el biométrico (Usuario y Tarjeta).`);
+  if (targetDevices.length > 0) {
+    let syncedDevicesCount = 0;
+    for (const dev of targetDevices) {
+      if (dev.ip && dev.username && dev.password) {
+        logEvent('info', `[MinMoe - ${dev.name}] Iniciando sincronización de "${name}" (${user_id}) en ${dev.ip}:${dev.port || 80}...`);
+        
+        const syncRes = await deviceHelper.syncFullUserToDevice({
+          device_ip: dev.ip,
+          device_port: dev.port || 80,
+          device_user: dev.username,
+          device_password: dev.password
+        }, user);
+
+        if (syncRes.synced) {
+          syncedDevicesCount++;
+          logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${name}" sincronizado con éxito (Usuario y Tarjeta).`);
+        } else {
+          logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${syncRes.summary}`);
+        }
+
+        syncRes.diagnostics.forEach(diag => {
+          deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
+          logEvent(syncRes.synced ? 'info' : 'warning', `  └─ [${dev.name}] ${diag}`);
+        });
       } else {
-        logEvent('warning', `[MinMoe ADVERTENCIA] Guardado en SQLite pero MinMoe reportó: ${deviceSyncResult.summary}`);
+        deviceSyncResult.diagnostics.push(`[${dev.name}] Faltan credenciales o IP del lector.`);
       }
-
-      deviceSyncResult.diagnostics.forEach(diag => {
-        logEvent(deviceSyncResult.synced ? 'info' : 'warning', `  └─ [MinMoe Detalle] ${diag}`);
-      });
-    } else {
-      logEvent('info', '[MinMoe] Sincronización omitida: Faltan credenciales del lector en la configuración (IP, Usuario o Contraseña).');
-      deviceSyncResult.diagnostics.push('Lector no configurado en ajustes del sistema.');
     }
-  } catch (syncErr) {
-    logEvent('error', `[MinMoe ERROR] Excepción durante la sincronización: ${syncErr.message}`);
-    deviceSyncResult = {
-      synced: false,
-      userSuccess: false,
-      cardSuccess: false,
-      diagnostics: [`Excepción de red: ${syncErr.message}`],
-      summary: syncErr.message
-    };
+
+    deviceSyncResult.synced = syncedDevicesCount === targetDevices.length;
+    deviceSyncResult.userSuccess = syncedDevicesCount > 0;
+    deviceSyncResult.cardSuccess = syncedDevicesCount > 0;
+    deviceSyncResult.summary = `${syncedDevicesCount}/${targetDevices.length} torniquete(s) sincronizados`;
+  } else {
+    logEvent('info', '[MinMoe] Sincronización omitida: No hay torniquetes seleccionados.');
+    deviceSyncResult.diagnostics.push('Sin torniquetes asignados.');
+    deviceSyncResult.summary = 'Sin torniquetes asignados';
   }
 
   res.json({
@@ -172,11 +203,11 @@ async function addUser(req, res) {
 }
 
 /**
- * Actualiza un usuario en la base de datos SQLite y sincroniza cambios con el MinMoe
+ * Actualiza un usuario en la base de datos SQLite y sincroniza cambios con los torniquetes asignados
  */
 async function updateUser(req, res) {
   const id = req.params.id;
-  let { user_id, name, api_url } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
@@ -186,8 +217,8 @@ async function updateUser(req, res) {
   }
 
   // Si no se proporcionó user_id, conservar el existente o generarlo/extraerlo
+  const existing = await dbHelper.getUserById(id);
   if (!user_id) {
-    const existing = await dbHelper.getUserById(id);
     if (existing && existing.user_id) {
       user_id = existing.user_id;
     } else {
@@ -202,45 +233,62 @@ async function updateUser(req, res) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
+  // Determinar dispositivos asignados
+  const allDevices = await dbHelper.getDevices();
+  let targetDeviceIds = null;
+
+  if (assign_all === true || assign_all === 'true') {
+    targetDeviceIds = allDevices.map(d => d.id);
+  } else if (device_ids && Array.isArray(device_ids)) {
+    targetDeviceIds = device_ids.map(Number).filter(Boolean);
+  } else if (device_id) {
+    targetDeviceIds = [Number(device_id)];
+  }
+
   logEvent('info', `[DB] Actualizando alumno en SQLite (ID registro ${id}): User ID: "${user_id}", Nombre: "${name}"...`);
 
   // Paso 1: Actualizar en SQLite
   try {
-    await dbHelper.updateUser(id, user_id, name, api_url);
+    await dbHelper.updateUser(id, user_id, name, api_url, targetDeviceIds);
     logEvent('success', `[DB OK] Alumno actualizado en SQLite: ID "${user_id}", Nombre: "${name}".`);
   } catch (dbErr) {
     logEvent('error', `[DB ERROR] Error al actualizar en SQLite: ${dbErr.message}`);
     return res.status(500).json({ error: `Error de base de datos al actualizar: ${dbErr.message}` });
   }
 
-  // Paso 2: Sincronizar con el hardware MinMoe
-  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [] };
-  try {
-    const settings = await dbHelper.getSettings();
-    if (settings.device_ip && settings.device_user && settings.device_password) {
-      logEvent('info', `[MinMoe] Actualizando datos de "${name}" (${user_id}) en el biométrico...`);
+  // Paso 2: Sincronizar con el hardware MinMoe de los torniquetes asignados
+  const currentDeviceIds = targetDeviceIds !== null ? targetDeviceIds : (existing ? existing.device_ids : []);
+  const targetDevices = allDevices.filter(d => currentDeviceIds.includes(d.id));
+  
+  let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
+  if (targetDevices.length > 0) {
+    let syncedDevicesCount = 0;
+    for (const dev of targetDevices) {
+      if (dev.ip && dev.username && dev.password) {
+        logEvent('info', `[MinMoe - ${dev.name}] Actualizando datos de "${name}" (${user_id}) en ${dev.ip}...`);
+        const syncRes = await deviceHelper.syncFullUserToDevice({
+          device_ip: dev.ip,
+          device_port: dev.port || 80,
+          device_user: dev.username,
+          device_password: dev.password
+        }, { user_id, name });
 
-      deviceSyncResult = await deviceHelper.syncFullUserToDevice(settings, { user_id, name });
+        if (syncRes.synced) {
+          syncedDevicesCount++;
+          logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${name}" actualizado con éxito.`);
+        } else {
+          logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${syncRes.summary}`);
+        }
 
-      if (deviceSyncResult.synced) {
-        logEvent('success', `[MinMoe OK] Alumno "${name}" actualizado con éxito en el biométrico (Usuario y Tarjeta).`);
-      } else {
-        logEvent('warning', `[MinMoe ADVERTENCIA] Actualizado en SQLite pero MinMoe reportó: ${deviceSyncResult.summary}`);
+        syncRes.diagnostics.forEach(diag => {
+          deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
+        });
       }
-
-      deviceSyncResult.diagnostics.forEach(diag => {
-        logEvent(deviceSyncResult.synced ? 'info' : 'warning', `  └─ [MinMoe Detalle] ${diag}`);
-      });
     }
-  } catch (syncErr) {
-    logEvent('error', `[MinMoe ERROR] Error al sincronizar actualización con biométrico: ${syncErr.message}`);
-    deviceSyncResult = {
-      synced: false,
-      userSuccess: false,
-      cardSuccess: false,
-      diagnostics: [`Error de red: ${syncErr.message}`],
-      summary: syncErr.message
-    };
+    deviceSyncResult.synced = syncedDevicesCount === targetDevices.length;
+    deviceSyncResult.userSuccess = syncedDevicesCount > 0;
+    deviceSyncResult.cardSuccess = syncedDevicesCount > 0;
+    deviceSyncResult.summary = `${syncedDevicesCount}/${targetDevices.length} torniquete(s) actualizados`;
   }
 
   res.json({
@@ -255,7 +303,7 @@ async function updateUser(req, res) {
 }
 
 /**
- * Eliminación de usuarios en el biométrico MinMoe, SQLite y archivos locales
+ * Eliminación de usuarios en los biométricos MinMoe asignados y en SQLite
  */
 async function deleteUser(req, res) {
   const id = req.params.id;
@@ -269,39 +317,34 @@ async function deleteUser(req, res) {
       return res.json({ success: true, message: 'Usuario no encontrado previamente.' });
     }
 
-    // Paso 1: Eliminar del hardware biométrico MinMoe
-    let deviceResult = { success: false, diagnostics: [], summary: 'Biométrico no configurado' };
-    try {
-      const settings = await dbHelper.getSettings();
-      if (settings.device_ip && settings.device_user && settings.device_password) {
-        logEvent('info', `[MinMoe] Eliminando alumno "${targetUser.name}" (${targetUser.user_id}) en el biométrico ${settings.device_ip}:${settings.device_port || 80}...`);
-        deviceResult = await deviceHelper.deleteUserFromDevice(
-          settings.device_ip,
-          settings.device_port || 80,
-          settings.device_user,
-          settings.device_password,
+    // Paso 1: Eliminar del hardware biométrico MinMoe de todos los torniquetes donde esté asignado
+    const allDevices = await dbHelper.getDevices();
+    const userDeviceIds = targetUser.device_ids || [];
+    const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
+
+    let deletedCount = 0;
+    const diagnostics = [];
+
+    for (const dev of targetDevices) {
+      if (dev.ip && dev.username && dev.password) {
+        logEvent('info', `[MinMoe - ${dev.name}] Eliminando alumno "${targetUser.name}" (${targetUser.user_id}) en ${dev.ip}...`);
+        const devRes = await deviceHelper.deleteUserFromDevice(
+          dev.ip,
+          dev.port || 80,
+          dev.username,
+          dev.password,
           targetUser.user_id
         );
 
-        if (deviceResult.success) {
-          logEvent('success', `[MinMoe OK] Alumno "${targetUser.name}" eliminado del biométrico exitosamente.`);
+        if (devRes.success) {
+          deletedCount++;
+          logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${targetUser.name}" eliminado del torniquete.`);
         } else {
-          logEvent('warning', `[MinMoe ADVERTENCIA] Eliminado en SQLite local pero MinMoe reportó: ${deviceResult.summary}`);
+          logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${devRes.summary}`);
         }
 
-        deviceResult.diagnostics.forEach(diag => {
-          logEvent(deviceResult.success ? 'info' : 'warning', `  └─ [MinMoe Detalle] ${diag}`);
-        });
-      } else {
-        logEvent('info', '[MinMoe] Eliminación en biométrico omitida: Faltan credenciales del dispositivo en configuración.');
+        devRes.diagnostics.forEach(diag => diagnostics.push(`[${dev.name}] ${diag}`));
       }
-    } catch (devErr) {
-      logEvent('error', `[MinMoe ERROR] Error al comunicar con el biométrico durante eliminación: ${devErr.message}`);
-      deviceResult = {
-        success: false,
-        diagnostics: [`Error de red: ${devErr.message}`],
-        summary: devErr.message
-      };
     }
 
     // Paso 2: Eliminar de la base de datos local SQLite
@@ -310,9 +353,9 @@ async function deleteUser(req, res) {
 
     res.json({
       success: true,
-      deviceDeleted: deviceResult.success,
-      deviceSummary: deviceResult.summary,
-      diagnostics: deviceResult.diagnostics
+      deviceDeleted: deletedCount > 0,
+      deviceSummary: `${deletedCount}/${targetDevices.length} torniquete(s) procesados`,
+      diagnostics
     });
   } catch (e) {
     logEvent('error', `[DB ERROR] Error al eliminar usuario: ${e.message}`);
@@ -320,12 +363,12 @@ async function deleteUser(req, res) {
   }
 }
 
-/**
 // Control de concurrencia para evitar peticiones masivas duplicadas simultáneas
 let isSyncInProgress = false;
 
 /**
- * Sincroniza TODOS los alumnos existentes en la base de datos hacia el dispositivo MinMoe
+ * Sincroniza alumnos existentes hacia el/los dispositivos MinMoe
+ * Admite filtrar por deviceId opcional
  */
 async function syncAllUsers(req, res) {
   if (isSyncInProgress) {
@@ -334,67 +377,85 @@ async function syncAllUsers(req, res) {
     });
   }
 
-  logEvent('info', '=== INICIANDO SINCRONIZACIÓN DE TODOS LOS ALUMNOS AL MINMOE ===');
   isSyncInProgress = true;
 
   try {
-    const settings = await dbHelper.getSettings();
-    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
-      const msg = 'No se puede sincronizar: IP, Usuario o Contraseña del MinMoe no están configurados.';
-      logEvent('warning', `[MinMoe] ${msg}`);
-      return res.status(400).json({ error: msg });
+    const targetDeviceId = req.query.deviceId || req.query.device_id;
+    const allDevices = await dbHelper.getDevices();
+    let devicesToSync = allDevices;
+
+    if (targetDeviceId) {
+      devicesToSync = allDevices.filter(d => String(d.id) === String(targetDeviceId));
     }
 
-    let users = await dbHelper.getUsers();
+    if (devicesToSync.length === 0) {
+      return res.status(400).json({ error: 'No hay torniquetes configurados para sincronizar.' });
+    }
+
+    logEvent('info', `=== INICIANDO SINCRONIZACIÓN DE ALUMNOS (${devicesToSync.length} torniquete(s)) ===`);
+
+    let allUsers = await dbHelper.getUsers();
     if (req.query.includeTests !== 'true') {
-      users = users.filter(u => !isTestUser(u));
-    }
-    if (users.length === 0) {
-      logEvent('warning', '[MinMoe] No hay usuarios reales en la base de datos local para sincronizar.');
-      return res.json({ total: 0, synced: 0, failed: 0, message: 'No hay usuarios de producción para sincronizar.' });
+      allUsers = allUsers.filter(u => !isTestUser(u));
     }
 
-    logEvent('info', `[MinMoe] Encontrados ${users.length} alumnos reales en SQLite. Sincronizando con ${settings.device_ip}:${settings.device_port || 80}...`);
-
-    let syncedCount = 0;
-    let failedCount = 0;
+    let globalSyncedCount = 0;
+    let globalFailedCount = 0;
     const results = [];
 
-    for (let i = 0; i < users.length; i++) {
-      const u = users[i];
-      const progressPercent = Math.round(((i + 1) / users.length) * 100);
-      logEvent('info', `[MinMoe ${progressPercent}%] [${i + 1}/${users.length}] Sincronizando: ${u.name} (ID: ${u.user_id})...`);
-
-      const syncRes = await deviceHelper.syncFullUserToDevice(settings, u);
-      if (syncRes.synced) {
-        syncedCount++;
-        logEvent('success', `  [OK] ${u.name} sincronizado correctamente.`);
-      } else {
-        failedCount++;
-        logEvent('warning', `  [ADVERTENCIA] ${u.name}: ${syncRes.summary}`);
+    for (const dev of devicesToSync) {
+      if (!dev.ip || !dev.username || !dev.password) {
+        logEvent('warning', `[MinMoe - ${dev.name}] Omitido: Faltan credenciales o IP.`);
+        continue;
       }
 
-      results.push({
-        user_id: u.user_id,
-        name: u.name,
-        synced: syncRes.synced,
-        diagnostics: syncRes.diagnostics
-      });
+      // Filtrar usuarios asignados a este dispositivo (o todos si no tienen restricción)
+      const devUsers = allUsers.filter(u => u.device_ids.length === 0 || u.device_ids.includes(dev.id));
+      logEvent('info', `[MinMoe - ${dev.name}] Sincronizando ${devUsers.length} alumnos asignados en ${dev.ip}:${dev.port || 80}...`);
 
-      // Breve pausa para no saturar el socket del hardware embebido Hikvision
-      if (i < users.length - 1) {
-        await new Promise(r => setTimeout(r, 25));
+      let devSynced = 0;
+      let devFailed = 0;
+
+      for (let i = 0; i < devUsers.length; i++) {
+        const u = devUsers[i];
+        const syncRes = await deviceHelper.syncFullUserToDevice({
+          device_ip: dev.ip,
+          device_port: dev.port || 80,
+          device_user: dev.username,
+          device_password: dev.password
+        }, u);
+
+        if (syncRes.synced) {
+          devSynced++;
+          globalSyncedCount++;
+        } else {
+          devFailed++;
+          globalFailedCount++;
+        }
+
+        results.push({
+          device: dev.name,
+          user_id: u.user_id,
+          name: u.name,
+          synced: syncRes.synced,
+          diagnostics: syncRes.diagnostics
+        });
+
+        if (i < devUsers.length - 1) {
+          await new Promise(r => setTimeout(r, 20));
+        }
       }
+
+      logEvent('info', `[MinMoe - ${dev.name}] Finalizado: ${devSynced} exitosos, ${devFailed} fallidos.`);
     }
 
-    const summaryMsg = `Sincronización completada: ${syncedCount} exitosos, ${failedCount} con advertencias de un total de ${users.length}.`;
+    const summaryMsg = `Sincronización finalizada: ${globalSyncedCount} exitosos, ${globalFailedCount} fallidos en ${devicesToSync.length} torniquete(s).`;
     logEvent('info', `=== ${summaryMsg.toUpperCase()} ===`);
 
     res.json({
       success: true,
-      total: users.length,
-      synced: syncedCount,
-      failed: failedCount,
+      synced: globalSyncedCount,
+      failed: globalFailedCount,
       message: summaryMsg,
       results
     });
@@ -407,7 +468,7 @@ async function syncAllUsers(req, res) {
 }
 
 /**
- * Sincroniza un único alumno existente hacia el dispositivo MinMoe
+ * Sincroniza un único alumno existente hacia sus dispositivos MinMoe asignados
  */
 async function syncSingleUser(req, res) {
   const id = req.params.id;
@@ -419,25 +480,44 @@ async function syncSingleUser(req, res) {
       return res.status(404).json({ error: 'Alumno no encontrado en la base de datos.' });
     }
 
-    const settings = await dbHelper.getSettings();
-    if (!settings.device_ip || !settings.device_user || !settings.device_password) {
-      return res.status(400).json({ error: 'Faltan parámetros del MinMoe en la configuración.' });
+    const allDevices = await dbHelper.getDevices();
+    const userDeviceIds = user.device_ids || [];
+    const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
+
+    if (targetDevices.length === 0) {
+      return res.status(400).json({ error: 'El usuario no tiene ningún torniquete asignado.' });
     }
 
-    logEvent('info', `[MinMoe] Sincronizando alumno individual: ${user.name} (ID: ${user.user_id})...`);
-    const syncRes = await deviceHelper.syncFullUserToDevice(settings, user);
+    logEvent('info', `[MinMoe] Sincronizando alumno individual: ${user.name} (ID: ${user.user_id}) en ${targetDevices.length} torniquete(s)...`);
+    
+    let syncedCount = 0;
+    const diagnostics = [];
 
-    if (syncRes.synced) {
-      logEvent('success', `[MinMoe OK] ${user.name} sincronizado con éxito (Usuario y Tarjeta).`);
-    } else {
-      logEvent('warning', `[MinMoe ADVERTENCIA] ${user.name}: ${syncRes.summary}`);
+    for (const dev of targetDevices) {
+      if (dev.ip && dev.username && dev.password) {
+        const syncRes = await deviceHelper.syncFullUserToDevice({
+          device_ip: dev.ip,
+          device_port: dev.port || 80,
+          device_user: dev.username,
+          device_password: dev.password
+        }, user);
+
+        if (syncRes.synced) {
+          syncedCount++;
+          logEvent('success', `[MinMoe OK - ${dev.name}] ${user.name} sincronizado con éxito.`);
+        } else {
+          logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${syncRes.summary}`);
+        }
+
+        syncRes.diagnostics.forEach(diag => diagnostics.push(`[${dev.name}] ${diag}`));
+      }
     }
 
     res.json({
-      success: syncRes.synced,
+      success: syncedCount > 0,
       user,
-      diagnostics: syncRes.diagnostics,
-      summary: syncRes.summary
+      diagnostics,
+      summary: `${syncedCount}/${targetDevices.length} torniquete(s) sincronizados`
     });
   } catch (e) {
     logEvent('error', `[MinMoe ERROR] Error al sincronizar alumno individual: ${e.message}`);

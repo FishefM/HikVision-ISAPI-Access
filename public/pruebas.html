@@ -37,7 +37,7 @@
           <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i>
           <span>Panel Principal</span>
         </a>
-        <a href="/feedback.html" target="_blank" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Abrir pantalla de visualización para alumnos">
+        <a href="/feedback" target="_blank" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Abrir pantalla de visualización para alumnos">
           <i data-lucide="tv" style="width: 14px; height: 14px;"></i>
           <span>Pantalla Feedback</span>
         </a>
@@ -124,6 +124,13 @@
           <div class="panel-body">
             <div class="simulator-controls">
               <div class="form-group">
+                <label for="sim-device">Torniquete a Simular</label>
+                <select id="sim-device" class="form-input">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+
+              <div class="form-group">
                 <label for="sim-user-id">Seleccionar Usuario de Prueba</label>
                 <select id="sim-user-id" class="form-input">
                   <option value="">-- Cargar usuarios de prueba --</option>
@@ -160,12 +167,20 @@
 
               <div class="divider">Prueba de Apertura de Torniquete</div>
 
+              <div class="form-group">
+                <label for="test-open-device">Seleccionar Torniquete a Abrir</label>
+                <select id="test-open-device" class="form-input">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+
               <button id="btn-test-open" class="btn btn-secondary" style="width: 100%; justify-content: center;">
                 <i data-lucide="key-round"></i> Enviar Comando Manual de Apertura (API)
               </button>
             </div>
           </div>
         </div>
+
 
         <!-- Mock APIs Info Card -->
         <div class="panel glass" style="margin-top: 1.5rem;">

@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Endpoints
   const API_USERS = '/api/users';
+  const API_DEVICES = '/api/devices';
   const API_LOGS = '/api/logs';
   const API_TEST_SCAN = '/api/test-scan';
   const API_TEST_OPEN = '/api/test-open-door';
@@ -13,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let testUsersList = [];
+  let devicesList = [];
   let logsList = [];
   let simCountTotal = 0;
   let simCountAuth = 0;
@@ -22,6 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const consoleLogs = document.getElementById('console-logs');
   const btnClearConsole = document.getElementById('btn-clear-console');
 
+  const simDeviceSelect = document.getElementById('sim-device');
+  const testOpenDeviceSelect = document.getElementById('test-open-device');
   const simUserIdSelect = document.getElementById('sim-user-id');
   const simCustomIdInput = document.getElementById('sim-custom-id');
   const simModeSelect = document.getElementById('sim-mode');
@@ -30,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const simResultTitle = document.getElementById('sim-result-title');
   const simResultDetail = document.getElementById('sim-result-detail');
   const btnTestOpen = document.getElementById('btn-test-open');
+
 
   const testUsersTableBody = document.querySelector('#test-users-table tbody');
   const btnShowAddTestUser = document.getElementById('btn-show-add-test-user');
@@ -126,11 +131,49 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Fetching Data
+  async function refreshDevices() {
+    try {
+      const res = await fetch(API_DEVICES);
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      devicesList = await res.json();
+      populateDeviceSelects();
+    } catch (err) {
+      console.error('Error fetching devices:', err);
+    }
+  }
+
+  function populateDeviceSelects() {
+    if (simDeviceSelect) {
+      simDeviceSelect.innerHTML = '';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = `${dev.name} (${dev.ip})`;
+        if (dev.is_default) opt.selected = true;
+        simDeviceSelect.appendChild(opt);
+      });
+    }
+
+    if (testOpenDeviceSelect) {
+      testOpenDeviceSelect.innerHTML = '';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = `${dev.name} (${dev.ip})`;
+        if (dev.is_default) opt.selected = true;
+        testOpenDeviceSelect.appendChild(opt);
+      });
+    }
+  }
+
   async function refreshTestUsers() {
     try {
       const res = await fetch(`${API_USERS}?filter=test`);
       if (res.status === 401) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
       testUsersList = await res.json();
@@ -149,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await fetch(API_LOGS);
       if (res.status === 401) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
       logsList = await res.json();
@@ -158,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error fetching logs:', err);
     }
   }
+
 
   // Rendering
   function renderTestUsersTable() {
@@ -383,13 +427,15 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnTestOpen) {
     btnTestOpen.addEventListener('click', async () => {
       btnTestOpen.disabled = true;
-      appendConsoleLog('info', 'Enviando comando manual de apertura al dispositivo...');
+      const targetDevId = testOpenDeviceSelect ? testOpenDeviceSelect.value : '';
+      appendConsoleLog('info', `Enviando comando manual de apertura ${targetDevId ? `al torniquete ID ${targetDevId}` : 'al dispositivo'}...`);
       try {
-        const res = await fetch(API_TEST_OPEN, { method: 'POST' });
+        const url = targetDevId ? `/api/devices/${targetDevId}/open-door` : API_TEST_OPEN;
+        const res = await fetch(url, { method: 'POST' });
         const data = await res.json();
         if (res.ok && data.success) {
-          appendConsoleLog('success', 'Comando de apertura ejecutado. El dispositivo respondió OK.');
-          alert('Comando de apertura enviado exitosamente al dispositivo.');
+          appendConsoleLog('success', `Comando de apertura ejecutado exitosamente.`);
+          alert(`Comando de apertura enviado exitosamente ${data.deviceName ? `a ${data.deviceName}` : ''}.`);
         } else {
           throw new Error(data.error || 'Respuesta errónea del hardware');
         }
@@ -468,7 +514,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const payload = {
         user_id: testUserIdInput.value.trim(),
         name: testUserNameInput.value.trim(),
-        api_url: testUserApiUrlInput.value.trim() || 'http://localhost:3000/api/mock-external-api/allow'
+        api_url: testUserApiUrlInput.value.trim() || 'http://localhost:3000/api/mock-external-api/allow',
+        assign_all: true // Usuarios de prueba asignados a todos por conveniencia
       };
 
       const isEdit = dbId !== '';
@@ -580,15 +627,17 @@ document.addEventListener('DOMContentLoaded', () => {
     btnLogout.addEventListener('click', async () => {
       try {
         await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login.html';
+        window.location.href = '/login';
       } catch (_) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
       }
     });
   }
 
   // Initialize
   connectEventStream();
+  refreshDevices();
   refreshTestUsers();
   refreshLogs();
 });
+
