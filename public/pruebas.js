@@ -113,7 +113,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function connectEventStream() {
     const source = new EventSource('/api/logs-stream');
+    const backendStatusDot = document.getElementById('backend-status-dot');
+
+    source.onopen = () => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator online';
+      }
+    };
+
     source.onmessage = (event) => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator online';
+      }
       try {
         const logData = JSON.parse(event.data);
         if (logData.type === 'access_feedback') return;
@@ -125,6 +136,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
     source.onerror = () => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator offline';
+      }
       source.close();
       setTimeout(connectEventStream, 3000);
     };

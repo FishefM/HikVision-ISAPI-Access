@@ -179,14 +179,21 @@ h1, h2, h3, h4, .metric-value {
 }
 
 .status-indicator {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .status-indicator.online {
   background-color: var(--success);
   box-shadow: 0 0 10px var(--success);
+}
+
+.status-indicator.offline {
+  background-color: var(--danger);
+  box-shadow: 0 0 10px var(--danger);
 }
 
 .status-text {

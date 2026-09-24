@@ -24,19 +24,18 @@
       <div class="header-logo">
         <i data-lucide="shield-check" class="logo-icon"></i>
         <div>
-          <h1>Torniquete Link</h1>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span id="backend-status-dot" class="status-indicator online" title="Estado del backend"></span>
+            <h1 style="margin: 0;">Torniquete Link</h1>
+          </div>
           <p>Servidor de Integración y Control Hikvision DS-K1T342MFWX-E1</p>
         </div>
       </div>
-      <div class="header-status" style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+      <div class="header-status" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
         <!-- User Badge -->
         <div id="current-user-badge" style="display: flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.85rem; background: rgba(0, 210, 255, 0.12); border: 1px solid rgba(0, 210, 255, 0.3); border-radius: 20px; font-size: 0.825rem; color: var(--accent);">
           <i data-lucide="user" style="width: 14px; height: 14px;"></i>
           <span id="current-user-name">Cargando...</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <span class="status-indicator online"></span>
-          <span class="status-text">Backend Activo</span>
         </div>
         <a href="/pruebas" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.8rem; text-decoration: none;" title="Entorno de simulación y pruebas">
           <i data-lucide="flask-conical" style="width: 14px; height: 14px;"></i>

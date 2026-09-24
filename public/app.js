@@ -137,8 +137,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function connectEventStream() {
     const source = new EventSource('/api/logs-stream');
+    const backendStatusDot = document.getElementById('backend-status-dot');
     
+    source.onopen = () => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator online';
+      }
+    };
+
     source.onmessage = (event) => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator online';
+      }
       try {
         const logData = JSON.parse(event.data);
         if (logData.type === 'access_feedback') return;
@@ -153,6 +163,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     source.onerror = () => {
+      if (backendStatusDot) {
+        backendStatusDot.className = 'status-indicator offline';
+      }
       source.close();
       setTimeout(connectEventStream, 3000);
     };
@@ -254,7 +267,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <span style="color: ${dev.enable_api_open ? 'var(--success)' : 'var(--text-muted)'};">${dev.enable_api_open ? 'Apertura Remota ON' : 'Apertura OFF'}</span>
           </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; flex-wrap: wrap;">
+          <a href="/feedback?device=${dev.id}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir pantalla de visualización para ${escapeHTML(dev.name)}" style="padding: 0.35rem 0.6rem; font-size: 0.75rem; text-decoration: none;">
+            <i data-lucide="tv" style="width: 14px; height: 14px;"></i> Pantalla
+          </a>
           <button class="btn btn-secondary btn-sm test-ping-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete" style="padding: 0.35rem 0.6rem; font-size: 0.75rem;">
             <i data-lucide="radio" style="width: 14px; height: 14px;"></i> Ping
           </button>

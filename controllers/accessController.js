@@ -599,10 +599,19 @@ const handleDevicePOST = async (req, res) => {
  * Escaneos simulados
  */
 async function testScan(req, res) {
-  const { userId, eventType } = req.body;
-  const clientIp = '127.0.0.1 (Simulado)';
+  const { userId, eventType, deviceId } = req.body;
+  let clientIp = '127.0.0.1';
+
+  if (deviceId) {
+    try {
+      const dev = await dbHelper.getDeviceById(deviceId);
+      if (dev && dev.ip) {
+        clientIp = dev.ip;
+      }
+    } catch (_) {}
+  }
   
-  logEvent('info', `Simulando escaneo de usuario para ID: ${userId}`);
+  logEvent('info', `Simulando escaneo de usuario para ID: ${userId}${deviceId ? ` en torniquete ID: ${deviceId}` : ''}`);
   
   try {
     const result = await processAccessRequest({
