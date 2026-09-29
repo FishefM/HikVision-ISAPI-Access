@@ -251,7 +251,13 @@ async function executeAccessValidation(reqInfo, clientIp) {
 
   // 1. Identificar el dispositivo MinMoe que origina la solicitud
   const formattedIp = cleanIPv4(clientIp);
-  let device = await dbHelper.getDeviceByIp(formattedIp);
+  let device = null;
+  if (reqInfo.deviceId) {
+    device = await dbHelper.getDeviceById(reqInfo.deviceId);
+  }
+  if (!device) {
+    device = await dbHelper.getDeviceByIp(formattedIp);
+  }
   if (!device) {
     device = await dbHelper.getDefaultDevice();
   }
@@ -426,7 +432,13 @@ async function processAccessRequest(reqInfo, clientIp) {
   }
 
   const formattedIp = cleanIPv4(clientIp);
-  let device = await dbHelper.getDeviceByIp(formattedIp);
+  let device = null;
+  if (reqInfo.deviceId) {
+    device = await dbHelper.getDeviceById(reqInfo.deviceId);
+  }
+  if (!device) {
+    device = await dbHelper.getDeviceByIp(formattedIp);
+  }
   if (!device) device = await dbHelper.getDefaultDevice();
   const deviceName = device ? device.name : 'Torniquete';
 
@@ -618,7 +630,8 @@ async function testScan(req, res) {
       userId,
       serialNo: String(Math.floor(Math.random() * 1000)),
       eventType: eventType || 'simulated_scan',
-      isHeartbeat: false
+      isHeartbeat: false,
+      deviceId: deviceId ? Number(deviceId) : null
     }, clientIp);
     
     res.json(result);

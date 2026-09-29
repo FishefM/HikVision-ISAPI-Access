@@ -365,13 +365,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Simulator Execution
   async function triggerSimulation(userId, mode = 'simulated_scan') {
     if (!userId) return;
-    appendConsoleLog('info', `Ejecutando simulación de lectura [Modo: ${mode}] para ID: ${userId}...`);
+    const selectedDeviceId = simDeviceSelect ? simDeviceSelect.value : null;
+    const selectedDevObj = devicesList.find(d => String(d.id) === String(selectedDeviceId));
+    const devLabel = selectedDevObj ? ` en "${selectedDevObj.name}"` : '';
+    appendConsoleLog('info', `Ejecutando simulación de lectura [Modo: ${mode}] para ID: ${userId}${devLabel}...`);
 
     try {
       const res = await fetch(API_TEST_SCAN, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, eventType: mode })
+        body: JSON.stringify({ userId, eventType: mode, deviceId: selectedDeviceId })
       });
 
       const result = await res.json();

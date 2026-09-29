@@ -1,6 +1,6 @@
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
-const { logEvent } = require('../utils/logger');
+const { logEvent, broadcastFeedback } = require('../utils/logger');
 const { hashPassword } = require('../utils/security');
 
 // ==========================================================================
@@ -209,6 +209,7 @@ async function openDoor(req, res) {
         device.name,
         device.ip
       );
+      broadcastFeedback(true, 'Apertura Remota', 'REMOTO', 'Apertura manual autorizada', device.id, device.name);
       res.json({ success: true, deviceName: device.name });
     } else {
       logEvent('error', `Fallo al abrir puerta en "${device.name}": ${result.error || 'Código estado ' + result.status}`);

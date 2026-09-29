@@ -4,6 +4,15 @@ const https = require('https');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
+function sanitizeIp(ip) {
+  if (!ip) return '127.0.0.1';
+  const clean = String(ip).replace('::ffff:', '').trim();
+  if (clean.includes('.')) {
+    return clean.split('.').map(o => isNaN(parseInt(o, 10)) ? o : String(parseInt(o, 10))).join('.');
+  }
+  return clean;
+}
+
 function md5(str) {
   return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -76,9 +85,10 @@ function calculateDigestHeader(method, uri, authParams, username, password) {
  * Sends a generic command to the Hikvision device using manual Digest Authentication.
  */
 async function sendISAPICommand(deviceIp, devicePort, username, password, method, path, xmlBody = null) {
+  const cleanHost = sanitizeIp(deviceIp);
   const isHttps = String(devicePort) === '443';
   const protocol = isHttps ? 'https' : 'http';
-  const url = `${protocol}://${deviceIp}:${devicePort}${path}`;
+  const url = `${protocol}://${cleanHost}:${devicePort}${path}`;
   const config = {
     method: method,
     url: url,
@@ -231,7 +241,10 @@ function extractISAPIDiagnostic(data, fallbackError = null) {
  * Sends a generic command to the Hikvision device using manual Digest Authentication and custom headers/body.
  */
 async function sendISAPIGenericRequest(deviceIp, devicePort, username, password, method, path, headers = {}, data = null, extraConfig = {}) {
-  const url = `http://${deviceIp}:${devicePort}${path}`;
+  const cleanHost = sanitizeIp(deviceIp);
+  const isHttps = String(devicePort) === '443';
+  const protocol = isHttps ? 'https' : 'http';
+  const url = `${protocol}://${cleanHost}:${devicePort}${path}`;
   const mergedHeaders = {
     'Accept': 'application/json, application/xml, text/xml, */*',
     ...headers
