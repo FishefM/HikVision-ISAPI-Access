@@ -63,13 +63,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Users Form & Table Elements
   const btnShowAddUser = document.getElementById('btn-show-add-user');
+  const btnSyncAcuaticApp = document.getElementById('btn-sync-acuaticapp');
+  const searchUserInput = document.getElementById('search-user-input');
+  const btnClearSearch = document.getElementById('btn-clear-search');
   const userFormContainer = document.getElementById('user-form-container');
   const userFormTitle = document.getElementById('user-form-title');
   const userForm = document.getElementById('user-form');
   const userDbIdInput = document.getElementById('user-db-id');
   const userIdInput = document.getElementById('user-id');
+  const userAcuaticAppIdInput = document.getElementById('user-acuaticapp-id');
+  const userFirstNameInput = document.getElementById('user-first-name');
+  const userSecondNameInput = document.getElementById('user-second-name');
+  const userLastNameInput = document.getElementById('user-last-name');
+  const userMatriculaInput = document.getElementById('user-matricula');
+  const userPhoneInput = document.getElementById('user-phone');
+  const userImageFileInput = document.getElementById('user-image-file');
   const userIdPreview = document.getElementById('user-id-preview');
-  const userNameInput = document.getElementById('user-name');
   const userApiUrlInput = document.getElementById('user-api-url');
   const userDeviceSelect = document.getElementById('user-device-select');
   const userAssignAllCheckbox = document.getElementById('user-assign-all');
@@ -190,12 +199,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function refreshUsers() {
+  let searchDebounceTimer = null;
+  async function refreshUsers(searchQuery = null) {
     try {
       const selectedDevId = filterUserDevice ? filterUserDevice.value : '';
+      const search = searchQuery !== null ? searchQuery : (searchUserInput ? searchUserInput.value.trim() : '');
       let url = `${API_USERS}?filter=production`;
       if (selectedDevId) {
         url += `&deviceId=${encodeURIComponent(selectedDevId)}`;
+      }
+      if (search) {
+        url += `&search=${encodeURIComponent(search)}`;
       }
 
       const res = await fetch(url);
@@ -251,38 +265,43 @@ document.addEventListener('DOMContentLoaded', () => {
         : '';
       
       const devCard = document.createElement('div');
-      devCard.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;';
+      devCard.className = 'device-card';
       
       devCard.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 0.2rem; min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-            <strong style="font-size: 0.95rem; color: var(--text-main);">${escapeHTML(dev.name)}</strong>
+        <div class="device-card-info">
+          <div class="device-card-header">
+            <div class="device-card-title-wrap">
+              <i data-lucide="cpu" class="device-card-icon"></i>
+              <strong class="device-card-name">${escapeHTML(dev.name)}</strong>
+            </div>
             ${defaultBadge}
           </div>
-          <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">
-            <span>IP: ${escapeHTML(dev.ip)}:${dev.port || 80}</span>
-            <span style="margin: 0 0.35rem;">•</span>
-            <span>Puerta: ${dev.door_channel || 1}</span>
-            <span style="margin: 0 0.35rem;">•</span>
-            <span style="color: ${dev.enable_api_open ? 'var(--success)' : 'var(--text-muted)'};">${dev.enable_api_open ? 'Apertura Remota ON' : 'Apertura OFF'}</span>
+          <div class="device-card-meta">
+            <span class="device-meta-tag"><i data-lucide="network" style="width:12px;height:12px;"></i> ${escapeHTML(dev.ip)}:${dev.port || 80}</span>
+            <span class="device-meta-tag"><i data-lucide="door-closed" style="width:12px;height:12px;"></i> Puerta ${dev.door_channel || 1}</span>
+            <span class="device-meta-tag ${dev.enable_api_open ? 'meta-success' : 'meta-muted'}">
+              <i data-lucide="${dev.enable_api_open ? 'unlock' : 'lock'}" style="width:12px;height:12px;"></i> ${dev.enable_api_open ? 'Apertura Remota ON' : 'Apertura OFF'}
+            </span>
           </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; flex-wrap: wrap;">
-          <a href="/feedback?device=${dev.id}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir pantalla de visualización para ${escapeHTML(dev.name)}" style="padding: 0.35rem 0.6rem; font-size: 0.75rem; text-decoration: none;">
-            <i data-lucide="tv" style="width: 14px; height: 14px;"></i> Pantalla
+        <div class="device-card-actions">
+          <a href="/feedback?device=${dev.id}" target="_blank" class="btn btn-secondary btn-sm dev-action-btn" title="Abrir pantalla de visualización para ${escapeHTML(dev.name)}">
+            <i data-lucide="tv" style="width:14px;height:14px;"></i> Pantalla
           </a>
-          <button class="btn btn-secondary btn-sm test-ping-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete" style="padding: 0.35rem 0.6rem; font-size: 0.75rem;">
-            <i data-lucide="radio" style="width: 14px; height: 14px;"></i> Ping
+          <button type="button" class="btn btn-secondary btn-sm test-ping-btn dev-action-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete">
+            <i data-lucide="radio" style="width:14px;height:14px;"></i> Ping
           </button>
-          <button class="btn btn-primary btn-sm test-open-btn" data-id="${dev.id}" title="Enviar comando de apertura a este torniquete" style="padding: 0.35rem 0.6rem; font-size: 0.75rem;">
-            <i data-lucide="unlock" style="width: 14px; height: 14px;"></i> Abrir
+          <button type="button" class="btn btn-primary btn-sm test-open-btn dev-action-btn" data-id="${dev.id}" title="Enviar comando de apertura a este torniquete">
+            <i data-lucide="unlock" style="width:14px;height:14px;"></i> Abrir
           </button>
-          <button class="btn btn-icon-only edit-device-btn" data-id="${dev.id}" title="Editar torniquete">
-            <i data-lucide="edit" style="width: 14px; height: 14px;"></i>
-          </button>
-          <button class="btn btn-icon-only text-danger delete-device-btn" data-id="${dev.id}" title="Eliminar torniquete" ${devicesList.length <= 1 ? 'disabled style="opacity:0.3;"' : ''}>
-            <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
-          </button>
+          <div class="dev-card-admin-actions">
+            <button type="button" class="btn btn-icon-only edit-device-btn" data-id="${dev.id}" title="Editar torniquete">
+              <i data-lucide="edit" style="width:14px;height:14px;"></i>
+            </button>
+            <button type="button" class="btn btn-icon-only text-danger delete-device-btn" data-id="${dev.id}" title="Eliminar torniquete" ${devicesList.length <= 1 ? 'disabled style="opacity:0.3;"' : ''}>
+              <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
         </div>
       `;
 
@@ -513,8 +532,68 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // Users Rendering & Handlers
   // ==========================================================================
+  // Search and Filter Listeners
   if (filterUserDevice) {
     filterUserDevice.addEventListener('change', () => refreshUsers());
+  }
+
+  if (searchUserInput) {
+    searchUserInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+      if (btnClearSearch) {
+        btnClearSearch.style.display = val.trim() ? 'block' : 'none';
+      }
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        refreshUsers(val.trim());
+      }, 250);
+    });
+  }
+
+  if (btnClearSearch && searchUserInput) {
+    btnClearSearch.addEventListener('click', () => {
+      searchUserInput.value = '';
+      btnClearSearch.style.display = 'none';
+      refreshUsers('');
+    });
+  }
+
+  if (btnSyncAcuaticApp) {
+    btnSyncAcuaticApp.addEventListener('click', async () => {
+      if (btnSyncAcuaticApp.disabled) return;
+      if (!confirm('¿Desea importar y sincronizar el catálogo de alumnos desde AcuaticApp v2 ahora? Se registrarán automáticamente con acceso escolar permitido.')) return;
+
+      btnSyncAcuaticApp.disabled = true;
+      const originalHtml = btnSyncAcuaticApp.innerHTML;
+      btnSyncAcuaticApp.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:14px;height:14px;"></i> Sincronizando...`;
+      if (window.lucide) window.lucide.createIcons();
+
+      appendConsoleLog('info', 'Iniciando sincronización con AcuaticApp v2...');
+
+      try {
+        const res = await fetch('/api/users/sync-acuaticapp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          appendConsoleLog('success', `[AcuaticApp OK] ${data.message}`);
+          alert(`[Sincronización Exitosa]\n${data.message}`);
+          refreshUsers();
+        } else {
+          throw new Error(data.error || 'Fallo en la sincronización');
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[AcuaticApp Error] ${err.message}`);
+        alert(`Error al sincronizar con AcuaticApp:\n${err.message}`);
+      } finally {
+        btnSyncAcuaticApp.disabled = false;
+        btnSyncAcuaticApp.innerHTML = originalHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
   }
 
   if (filterLogDevice) {
@@ -537,7 +616,7 @@ document.addEventListener('DOMContentLoaded', () => {
     usersTableBody.innerHTML = '';
     
     if (usersList.length === 0) {
-      usersTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No hay usuarios registrados.</td></tr>`;
+      usersTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 1.5rem;">No se encontraron alumnos que coincidan con la búsqueda.</td></tr>`;
       return;
     }
 
@@ -545,7 +624,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let devicesBadge = '';
       if (user.device_names && user.device_names.length > 0) {
         if (user.device_names.length === devicesList.length && devicesList.length > 1) {
-          devicesBadge = `<span class="badge badge-primary" style="font-size:0.75rem;">Todos los Torniquetes (${user.device_names.length})</span>`;
+          devicesBadge = `<span class="badge badge-primary" style="font-size:0.75rem;">Todos (${user.device_names.length})</span>`;
         } else {
           devicesBadge = user.device_names.map(name => `<span class="badge badge-info" style="font-size:0.75rem; margin-right: 0.2rem;">${escapeHTML(name)}</span>`).join('');
         }
@@ -553,21 +632,43 @@ document.addEventListener('DOMContentLoaded', () => {
         devicesBadge = `<span class="badge badge-secondary" style="font-size:0.75rem;">Predeterminado</span>`;
       }
 
+      // Avatar o Foto
+      const initials = (user.name || '').split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'AL';
+      let avatarHtml = `<div class="user-avatar-initials">${initials}</div>`;
+      if (user.image_file) {
+        avatarHtml = `
+          <div class="user-avatar-wrap">
+            <img src="${escapeHTML(user.image_file)}" alt="${escapeHTML(user.name)}" class="user-avatar-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div class="user-avatar-initials" style="display:none;">${initials}</div>
+          </div>
+        `;
+      }
+
+      const acuaticBadge = user.acuaticapp_id 
+        ? `<span class="badge badge-info" style="font-size:0.65rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem;">AcuaticApp</span>` 
+        : '';
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><strong>${escapeHTML(user.user_id)}</strong></td>
-        <td>${escapeHTML(user.name)}</td>
+        <td><strong>${escapeHTML(user.matricula || user.user_id)}</strong></td>
+        <td style="text-align: center;">${avatarHtml}</td>
+        <td>
+          <div style="display: flex; align-items: center; flex-wrap: wrap;">
+            <strong>${escapeHTML(user.name)}</strong>
+            ${acuaticBadge}
+          </div>
+        </td>
+        <td><span class="text-muted" style="font-size:0.85rem;">${user.phone ? escapeHTML(user.phone) : '—'}</span></td>
         <td>${devicesBadge}</td>
-        <td><span class="text-muted" style="font-size:0.8rem; word-break:break-all;">${user.api_url ? escapeHTML(user.api_url) : '<span style="font-style:italic; opacity:0.6;">Sin URL</span>'}</span></td>
-        <td class="actions-col">
-          <div class="action-btn-group">
+        <td class="actions-col" style="text-align: right;">
+          <div class="action-btn-group" style="justify-content: flex-end;">
             <button class="btn btn-icon-only text-info qr-user-btn" data-id="${user.id}" title="Ver Credencial / Código QR">
               <i data-lucide="qr-code"></i>
             </button>
-            <button class="btn btn-icon-only edit-user-btn" data-id="${user.id}" title="Editar">
+            <button class="btn btn-icon-only edit-user-btn" data-id="${user.id}" title="Editar Alumno">
               <i data-lucide="edit"></i>
             </button>
-            <button class="btn btn-icon-only text-danger delete-user-btn" data-id="${user.id}" title="Eliminar">
+            <button class="btn btn-icon-only text-danger delete-user-btn" data-id="${user.id}" title="Eliminar Alumno">
               <i data-lucide="trash-2"></i>
             </button>
           </div>
@@ -599,7 +700,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', async (e) => {
         const id = parseInt(e.currentTarget.getAttribute('data-id'));
         const user = usersList.find(u => u.id === id);
-        if (user && confirm(`¿Está seguro de eliminar al usuario ${user.name} de la base de datos local y de sus torniquetes asignados?`)) {
+        if (user && confirm(`¿Está seguro de eliminar al alumno "${user.name}" de la base de datos local y de sus torniquetes asignados?`)) {
           appendConsoleLog('info', `Eliminando a "${user.name}" (ID: ${user.user_id})...`);
           try {
             const res = await fetch(`${API_USERS}/${id}`, { method: 'DELETE' });
@@ -771,21 +872,29 @@ document.addEventListener('DOMContentLoaded', () => {
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
     if (user) {
-      userFormTitle.textContent = 'Editar Usuario';
+      userFormTitle.textContent = 'Editar Alumno';
       userDbIdInput.value = user.id;
-      userIdInput.value = user.user_id;
-      userNameInput.value = user.name;
-      userApiUrlInput.value = user.api_url;
+      userIdInput.value = user.user_id || '';
+      if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = user.acuaticapp_id || '';
+      
+      // Separar nombres o usar campos existentes
+      if (userFirstNameInput) userFirstNameInput.value = user.first_name || user.name || '';
+      if (userSecondNameInput) userSecondNameInput.value = user.second_name || '';
+      if (userLastNameInput) userLastNameInput.value = user.last_name || '';
+      if (userMatriculaInput) userMatriculaInput.value = user.matricula || user.user_id || '';
+      if (userPhoneInput) userPhoneInput.value = user.phone || '';
+      if (userImageFileInput) userImageFileInput.value = user.image_file || '';
+      if (userApiUrlInput) userApiUrlInput.value = user.api_url || 'http://localhost:3000/api/mock-external-api/allow';
 
       // Asignación de torniquetes
       const userDevs = user.device_ids || [];
       const hasAll = devicesList.length > 1 && userDevs.length === devicesList.length;
       if (userAssignAllCheckbox) {
-        userAssignAllCheckbox.checked = hasAll;
+        userAssignAllCheckbox.checked = hasAll || userDevs.length === 0;
       }
       if (userDeviceSelect) {
-        userDeviceSelect.disabled = hasAll;
-        userDeviceSelect.style.opacity = hasAll ? '0.5' : '1';
+        userDeviceSelect.disabled = userAssignAllCheckbox ? userAssignAllCheckbox.checked : false;
+        userDeviceSelect.style.opacity = (userAssignAllCheckbox && userAssignAllCheckbox.checked) ? '0.5' : '1';
         if (userDevs.length > 0) {
           userDeviceSelect.value = userDevs[0];
         }
@@ -793,18 +902,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
       updateUserIdPreview();
     } else {
-      userFormTitle.textContent = 'Registrar Nuevo Usuario';
+      userFormTitle.textContent = 'Registrar Nuevo Alumno';
       userForm.reset();
       userDbIdInput.value = '';
       userIdInput.value = '';
+      if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = '';
+      if (userFirstNameInput) userFirstNameInput.value = '';
+      if (userSecondNameInput) userSecondNameInput.value = '';
+      if (userLastNameInput) userLastNameInput.value = '';
+      if (userMatriculaInput) userMatriculaInput.value = '';
+      if (userPhoneInput) userPhoneInput.value = '';
+      if (userImageFileInput) userImageFileInput.value = '';
+      if (userApiUrlInput) userApiUrlInput.value = 'http://localhost:3000/api/mock-external-api/allow';
 
-      // Habitual: por defecto a un solo torniquete (predeterminado)
       if (userAssignAllCheckbox) {
-        userAssignAllCheckbox.checked = false;
+        userAssignAllCheckbox.checked = true;
       }
       if (userDeviceSelect) {
-        userDeviceSelect.disabled = false;
-        userDeviceSelect.style.opacity = '1';
+        userDeviceSelect.disabled = true;
+        userDeviceSelect.style.opacity = '0.5';
         const defaultDev = devicesList.find(d => d.is_default);
         if (defaultDev) {
           userDeviceSelect.value = defaultDev.id;
@@ -822,6 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
     userForm.reset();
     userDbIdInput.value = '';
     userIdInput.value = '';
+    if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = '';
     if (userIdPreview) userIdPreview.textContent = '';
   }
 
@@ -832,22 +949,39 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const dbId = userDbIdInput.value;
     
-    let apiUrlValue = userApiUrlInput.value.trim();
+    let apiUrlValue = userApiUrlInput ? userApiUrlInput.value.trim() : '';
     if (!apiUrlValue) {
       apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
     }
 
-    let finalUserId = userIdInput.value.trim();
-    if (!finalUserId && apiUrlValue !== 'http://localhost:3000/api/mock-external-api/allow') {
+    const firstName = userFirstNameInput ? userFirstNameInput.value.trim() : '';
+    const secondName = userSecondNameInput ? userSecondNameInput.value.trim() : '';
+    const lastName = userLastNameInput ? userLastNameInput.value.trim() : '';
+    const matricula = userMatriculaInput ? userMatriculaInput.value.trim() : '';
+    const phone = userPhoneInput ? userPhoneInput.value.trim() : '';
+    const imageFile = userImageFileInput ? userImageFileInput.value.trim() : '';
+    const acuaticId = userAcuaticAppIdInput && userAcuaticAppIdInput.value ? parseInt(userAcuaticAppIdInput.value, 10) : null;
+
+    const fullName = [firstName, secondName, lastName].filter(Boolean).join(' ').trim() || matricula;
+    let finalUserId = matricula || userIdInput.value.trim();
+
+    if (!finalUserId && apiUrlValue && !apiUrlValue.includes('mock-external-api')) {
       finalUserId = extractIdFromUrl(apiUrlValue);
     }
 
-    const assignAll = userAssignAllCheckbox ? userAssignAllCheckbox.checked : false;
+    const assignAll = userAssignAllCheckbox ? userAssignAllCheckbox.checked : true;
     const selectedDeviceId = userDeviceSelect ? parseInt(userDeviceSelect.value, 10) : null;
 
     const payload = {
       user_id: finalUserId,
-      name: userNameInput.value.trim(),
+      matricula: matricula,
+      name: fullName,
+      first_name: firstName,
+      second_name: secondName,
+      last_name: lastName,
+      phone: phone,
+      image_file: imageFile,
+      acuaticapp_id: acuaticId,
       api_url: apiUrlValue,
       assign_all: assignAll,
       device_ids: (!assignAll && selectedDeviceId) ? [selectedDeviceId] : []

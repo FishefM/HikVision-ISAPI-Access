@@ -53,12 +53,13 @@ function isTestUser(user) {
 /**
  * Obtiene usuarios registrados de la base de datos local SQLite,
  * con soporte para filtrar usuarios reales (producción) o de prueba,
- * y filtro opcional por ID de torniquete/dispositivo.
+ * filtro por texto/búsqueda y filtro opcional por ID de torniquete/dispositivo.
  */
 async function getUsers(req, res) {
   try {
     const deviceId = req.query.deviceId || req.query.device_id;
-    const users = await dbHelper.getUsers(null, deviceId);
+    const search = req.query.search || req.query.q || req.query.busqueda || '';
+    const users = await dbHelper.getUsers(null, deviceId, search);
     const filter = req.query.filter;
     if (filter === 'test' || filter === 'pruebas') {
       return res.json(users.filter(u => isTestUser(u)));
@@ -73,25 +74,39 @@ async function getUsers(req, res) {
 }
 
 /**
- * Crea un nuevo usuario en la base de datos SQLite y sincroniza con el(los) MinMoe asignado(s).
- * Por defecto asigna a un solo torniquete (el seleccionado o default), con opción de asignar a todos.
+ * Crea o actualiza un usuario en la base de datos SQLite y sincroniza con el(los) MinMoe asignado(s).
  */
 async function addUser(req, res) {
-  let { user_id, name, api_url, device_ids, assign_all, device_id } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
+  matricula = matricula ? String(matricula).trim() : '';
+  first_name = first_name ? String(first_name).trim() : '';
+  second_name = second_name ? String(second_name).trim() : '';
+  last_name = last_name ? String(last_name).trim() : '';
+  phone = phone ? String(phone).trim() : '';
+  image_file = image_file ? String(image_file).trim() : '';
 
   // Asignar API URL de validación permitida (allow) por defecto si no se ingresó una
   if (!api_url) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
+  // Si no se proporcionó nombre completo pero sí nombres/apellidos
+  if (!name && (first_name || second_name || last_name)) {
+    name = [first_name, second_name, last_name].filter(Boolean).join(' ').trim();
+  }
+
   // Generación o extracción automática de user_id
   if (!user_id) {
-    user_id = extractIdFromApiUrl(api_url);
-    if (!user_id) {
-      user_id = crypto.randomBytes(4).toString('hex');
+    if (matricula) {
+      user_id = matricula;
+    } else {
+      user_id = extractIdFromApiUrl(api_url);
+      if (!user_id) {
+        user_id = crypto.randomBytes(4).toString('hex');
+      }
     }
     logEvent('info', `[ID AUTOMÁTICO] ID generado/extraído para "${name}": "${user_id}"`);
   }
@@ -101,18 +116,17 @@ async function addUser(req, res) {
     return res.status(400).json({ error: 'Falta el campo obligatorio Nombre del alumno.' });
   }
 
-  // Determinar dispositivos asignados (por defecto solo 1 torniquete, opcionalmente todos)
+  // Determinar dispositivos asignados
   let targetDeviceIds = [];
   const allDevices = await dbHelper.getDevices();
 
-  if (assign_all === true || assign_all === 'true') {
+  if (assign_all === true || assign_all === 'true' || assign_all === undefined) {
     targetDeviceIds = allDevices.map(d => d.id);
   } else if (device_ids && Array.isArray(device_ids) && device_ids.length > 0) {
     targetDeviceIds = device_ids.map(Number).filter(Boolean);
   } else if (device_id) {
     targetDeviceIds = [Number(device_id)];
   } else {
-    // Por defecto habitual: asignar al torniquete predeterminado (solo 1 dispositivo)
     const defaultDev = await dbHelper.getDefaultDevice();
     if (defaultDev) {
       targetDeviceIds = [defaultDev.id];
@@ -121,30 +135,32 @@ async function addUser(req, res) {
     }
   }
 
-  logEvent('info', `[DB] Intentando registrar alumno en SQLite: ID "${user_id}", Nombre: "${name}", Torniquetes asignados: [${targetDeviceIds.join(', ')}]...`);
+  logEvent('info', `[DB] Guardando alumno en SQLite: ID "${user_id}", Nombre: "${name}", Torniquetes asignados: [${targetDeviceIds.join(', ')}]...`);
 
   let user = null;
-  // Paso 1: Inserción en la base de datos local SQLite
+  // Paso 1: Inserción / Upsert en la base de datos local SQLite (evitando duplicados)
   try {
-    user = await dbHelper.addUser(user_id, name, api_url, targetDeviceIds);
-    logEvent('success', `[DB OK] Alumno guardado exitosamente en SQLite local (Registro ID: ${user.id}, User ID: "${user_id}").`);
+    user = await dbHelper.addUser({
+      user_id,
+      name,
+      api_url,
+      matricula,
+      first_name,
+      second_name,
+      last_name,
+      phone,
+      image_file,
+      acuaticapp_id,
+      device_ids: targetDeviceIds
+    });
+    logEvent('success', `[DB OK] Alumno guardado exitosamente en SQLite local (Registro ID: ${user.id}, User ID: "${user.user_id}").`);
   } catch (dbErr) {
-    if (dbErr.message && dbErr.message.includes('UNIQUE')) {
-      const msg = `El ID de usuario "${user_id}" ya está registrado en la base de datos local (Conflicto de clave única SQLite).`;
-      logEvent('error', `[DB ERROR] ${msg}`);
-      return res.status(400).json({
-        error: msg,
-        dbError: dbErr.message,
-        code: 'SQLITE_UNIQUE_CONSTRAINT'
-      });
-    } else {
-      const msg = `Error al insertar en la base de datos SQLite: ${dbErr.message}`;
-      logEvent('error', `[DB ERROR] ${msg}`);
-      return res.status(500).json({
-        error: msg,
-        dbError: dbErr.message
-      });
-    }
+    const msg = `Error al insertar en la base de datos SQLite: ${dbErr.message}`;
+    logEvent('error', `[DB ERROR] ${msg}`);
+    return res.status(500).json({
+      error: msg,
+      dbError: dbErr.message
+    });
   }
 
   // Paso 2: Sincronización con el hardware Hikvision MinMoe de cada torniquete asignado
@@ -207,10 +223,20 @@ async function addUser(req, res) {
  */
 async function updateUser(req, res) {
   const id = req.params.id;
-  let { user_id, name, api_url, device_ids, assign_all, device_id } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
+  matricula = matricula ? String(matricula).trim() : '';
+  first_name = first_name ? String(first_name).trim() : '';
+  second_name = second_name ? String(second_name).trim() : '';
+  last_name = last_name ? String(last_name).trim() : '';
+  phone = phone ? String(phone).trim() : '';
+  image_file = image_file ? String(image_file).trim() : '';
+
+  if (!name && (first_name || second_name || last_name)) {
+    name = [first_name, second_name, last_name].filter(Boolean).join(' ').trim();
+  }
 
   if (!name) {
     return res.status(400).json({ error: 'Falta el campo obligatorio Nombre del alumno.' });
@@ -221,6 +247,8 @@ async function updateUser(req, res) {
   if (!user_id) {
     if (existing && existing.user_id) {
       user_id = existing.user_id;
+    } else if (matricula) {
+      user_id = matricula;
     } else {
       user_id = extractIdFromApiUrl(api_url);
       if (!user_id) {
@@ -249,7 +277,19 @@ async function updateUser(req, res) {
 
   // Paso 1: Actualizar en SQLite
   try {
-    await dbHelper.updateUser(id, user_id, name, api_url, targetDeviceIds);
+    await dbHelper.updateUser(id, {
+      user_id,
+      name,
+      api_url,
+      matricula,
+      first_name,
+      second_name,
+      last_name,
+      phone,
+      image_file,
+      acuaticapp_id,
+      device_ids: targetDeviceIds
+    });
     logEvent('success', `[DB OK] Alumno actualizado en SQLite: ID "${user_id}", Nombre: "${name}".`);
   } catch (dbErr) {
     logEvent('error', `[DB ERROR] Error al actualizar en SQLite: ${dbErr.message}`);
@@ -271,7 +311,7 @@ async function updateUser(req, res) {
           device_port: dev.port || 80,
           device_user: dev.username,
           device_password: dev.password
-        }, { user_id, name });
+        }, { user_id, name, image_file });
 
         if (syncRes.synced) {
           syncedDevicesCount++;
@@ -300,6 +340,116 @@ async function updateUser(req, res) {
     syncSummary: deviceSyncResult.summary,
     diagnostics: deviceSyncResult.diagnostics
   });
+}
+
+/**
+ * Importa y sincroniza todos los alumnos desde la API v2 de AcuaticApp
+ * hacia la base de datos local SQLite con URL de acceso permitido por defecto.
+ */
+async function syncAcuaticAppUsers(req, res) {
+  const schoolUser = (req.body && req.body.user) || process.env.ACUATICAPP_USER || 'WONDERPUL_BOSQUES';
+  const schoolPass = (req.body && req.body.password) || process.env.ACUATICAPP_PASSWORD || 'W16Ku891';
+  const baseUrl = (req.body && req.body.baseUrl) || process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+
+  logEvent('info', `=== INICIANDO IMPORTACIÓN DESDE ACUATICAPP V2 (${baseUrl}) ===`);
+  logEvent('info', `Autenticando escuela "${schoolUser}"...`);
+
+  try {
+    // 1. Login en AcuaticApp
+    const loginRes = await fetch(`${baseUrl}/api/school/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: schoolUser, password: schoolPass }),
+      signal: AbortSignal.timeout(10000)
+    });
+
+    const loginData = await loginRes.json();
+    if (!loginRes.ok || !loginData.token) {
+      throw new Error(loginData.message || `Fallo de autenticación en AcuaticApp (HTTP ${loginRes.status})`);
+    }
+
+    const token = loginData.token;
+    const schoolInfo = loginData.school || {};
+    logEvent('success', `[AcuaticApp OK] Escuela autenticada exitosamente (ID: ${schoolInfo.id || 'N/A'}). Obteniendo lista de alumnos...`);
+
+    // 2. Obtener lista paginada de alumnos
+    let currentPage = 1;
+    let lastPage = 1;
+    let totalProcessed = 0;
+    let createdCount = 0;
+    let updatedCount = 0;
+    const allDevices = await dbHelper.getDevices();
+    const allDeviceIds = allDevices.map(d => d.id);
+
+    while (currentPage <= lastPage) {
+      logEvent('info', `Consultando página ${currentPage} de alumnos en AcuaticApp...`);
+      const studentsRes = await fetch(`${baseUrl}/api/v2/administration/student/getStudents?page=${currentPage}&per_page=50`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!studentsRes.ok) {
+        throw new Error(`Error al consultar alumnos en página ${currentPage} (HTTP ${studentsRes.status})`);
+      }
+
+      const studentsData = await studentsRes.json();
+      const studentsList = studentsData.data || [];
+      lastPage = parseInt(studentsData.last_page || 1, 10);
+
+      for (const st of studentsList) {
+        // Construir nombre completo y campos
+        const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
+        const matriculaStr = st.matricula ? String(st.matricula).trim() : '';
+        const userId = matriculaStr || String(st.id);
+
+        try {
+          const userResult = await dbHelper.addUser({
+            user_id: userId,
+            name: fullName,
+            api_url: 'http://localhost:3000/api/mock-external-api/allow',
+            matricula: matriculaStr || null,
+            first_name: st.name || null,
+            second_name: st.second_name || null,
+            last_name: st.last_name || null,
+            phone: st.phone || null,
+            image_file: st.image_file || null,
+            acuaticapp_id: st.id,
+            device_ids: allDeviceIds
+          });
+
+          if (userResult.is_created) {
+            createdCount++;
+          } else {
+            updatedCount++;
+          }
+          totalProcessed++;
+        } catch (uErr) {
+          logEvent('warning', `No se pudo procesar alumno ID ${st.id} (${fullName}): ${uErr.message}`);
+        }
+      }
+
+      currentPage++;
+    }
+
+    const summary = `Sincronización completada: ${totalProcessed} alumnos procesados (${createdCount} nuevos, ${updatedCount} actualizados).`;
+    logEvent('success', `=== ${summary.toUpperCase()} ===`);
+
+    res.json({
+      success: true,
+      total: totalProcessed,
+      created: createdCount,
+      updated: updatedCount,
+      school: schoolInfo,
+      message: summary
+    });
+  } catch (err) {
+    logEvent('error', `[AcuaticApp ERROR] Fallo durante la importación: ${err.message}`);
+    res.status(500).json({ error: `Fallo al sincronizar con AcuaticApp: ${err.message}` });
+  }
 }
 
 /**
@@ -566,5 +716,6 @@ module.exports = {
   deleteUser,
   syncAllUsers,
   syncSingleUser,
+  syncAcuaticAppUsers,
   getUserQR
 };

@@ -27,6 +27,7 @@ router.put('/users/:id', userController.updateUser);
 router.delete('/users/:id', userController.deleteUser);
 router.post('/users/sync-all', userController.syncAllUsers);
 router.post('/users/:id/sync-device', userController.syncSingleUser);
+router.post('/users/sync-acuaticapp', userController.syncAcuaticAppUsers);
 
 // MinMoe Devices routes (Read-only for receptionist dropdowns, modifications require Admin)
 router.get('/devices', settingsController.getDevices);
