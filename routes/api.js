@@ -44,6 +44,7 @@ router.post('/settings', requireAdmin, settingsController.updateSettings);
 
 // Logs routes (Clear logs is Admin only, viewing logs is open to receptionists)
 router.get('/logs', settingsController.getLogs);
+router.get('/stats', settingsController.getAccessStats);
 router.post('/logs/clear', requireAdmin, settingsController.clearLogs);
 
 // Door control routes

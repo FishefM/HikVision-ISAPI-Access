@@ -839,7 +839,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  function updateMetrics() {
+  async function updateMetrics() {
+    try {
+      const selectedDevId = filterLogDevice ? filterLogDevice.value : '';
+      let url = '/api/stats';
+      if (selectedDevId) {
+        url += `?deviceId=${encodeURIComponent(selectedDevId)}`;
+      }
+      const res = await fetch(url);
+      if (res.ok) {
+        const stats = await res.json();
+        metricTotal.textContent = stats.total;
+        metricAuthorized.textContent = stats.authorized;
+        metricDenied.textContent = stats.denied;
+        metricRate.textContent = `${stats.rate}%`;
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback local
     const total = logsList.length;
     const authorized = logsList.filter(l => l.authorized === 1).length;
     const denied = logsList.filter(l => l.authorized === 0).length;

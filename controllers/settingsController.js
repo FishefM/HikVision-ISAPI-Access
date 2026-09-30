@@ -285,6 +285,19 @@ async function getLogs(req, res) {
   }
 }
 
+/**
+ * Retorna las estadísticas agregadas reales de accesos
+ */
+async function getAccessStats(req, res) {
+  try {
+    const deviceId = req.query.deviceId;
+    const stats = await dbHelper.getAccessStats(deviceId);
+    res.json(stats);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
 module.exports = {
   getDevices,
   getDevice,
@@ -296,5 +309,6 @@ module.exports = {
   getSettings,
   updateSettings,
   clearLogs,
-  getLogs
+  getLogs,
+  getAccessStats
 };

@@ -687,6 +687,29 @@ const getLogs = (options = {}) => new Promise((res, rej) => {
   db.all(query, params, (err, rows) => err ? rej(err) : res(rows));
 });
 
+const getAccessStats = (deviceId = null) => new Promise((res, rej) => {
+  let query = `
+    SELECT 
+      COUNT(*) as total,
+      SUM(CASE WHEN authorized = 1 THEN 1 ELSE 0 END) as authorized,
+      SUM(CASE WHEN authorized = 0 THEN 1 ELSE 0 END) as denied
+    FROM access_logs
+  `;
+  const params = [];
+  if (deviceId) {
+    query += " WHERE device_id = ?";
+    params.push(Number(deviceId));
+  }
+  db.get(query, params, (err, row) => {
+    if (err) return rej(err);
+    const total = row ? (row.total || 0) : 0;
+    const authorized = row ? (row.authorized || 0) : 0;
+    const denied = row ? (row.denied || 0) : 0;
+    const rate = total > 0 ? Math.round((authorized / total) * 100) : 0;
+    res({ total, authorized, denied, rate });
+  });
+});
+
 const addLog = (userId, name, eventType, apiUrl, apiResponse, authorized, doorOpened, deviceId = null, deviceName = null, deviceIp = null) => new Promise((res, rej) => {
   db.run(
     `INSERT INTO access_logs (user_id, name, event_type, api_url, api_response, authorized, door_opened, device_id, device_name, device_ip) 
@@ -867,6 +890,7 @@ module.exports = {
   updateUser,
   deleteUser,
   getLogs,
+  getAccessStats,
   addLog,
   clearLogs,
   cleanOldLogs,
