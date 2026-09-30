@@ -277,6 +277,18 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
+  let bodyDeviceIp = null;
+  if (req.body) {
+    bodyDeviceIp = req.body.ipAddress || req.body.devIp || (req.body.AccessControllerEvent && req.body.AccessControllerEvent.ipAddress) || null;
+  }
+  if (!bodyDeviceIp && req.rawBody) {
+    const ipMatch = req.rawBody.match(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/i) ||
+                    req.rawBody.match(/"ipAddress"\s*:\s*["']?([^"',\s}]+)["']?/i);
+    if (ipMatch && ipMatch[1]) {
+      bodyDeviceIp = ipMatch[1].trim();
+    }
+  }
+
   // Pista de torniquete por parámetros, query, headers o URL
   const nonDeviceKeywords = ['event', 'events', 'isapi', 'remotecheck', 'events-stream', 'logs-stream'];
   let deviceId = (req.params && req.params.id) ? req.params.id : null;
@@ -299,7 +311,7 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
-  return { userId, serialNo, eventType, isHeartbeat, deviceId, bodyDevice };
+  return { userId, serialNo, eventType, isHeartbeat, deviceId, bodyDevice, bodyDeviceIp };
 }
 
 /**
@@ -363,7 +375,7 @@ function getClientIp(req) {
  * 3. IP de origen del hardware contra el catálogo de devices
  * 4. Fallback al dispositivo por defecto
  */
-async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
+async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null, bodyDeviceIp = null) {
   let allDevs = [];
   try {
     allDevs = await dbHelper.getDevices();
@@ -396,7 +408,19 @@ async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
     }
   }
 
-  // 2. Pista en cuerpo de la notificación (deviceName, deviceNo, etc.)
+  // 2. Pista por dirección IP reportada en el payload del MinMoe (ej. "ipAddress": "192.168.100.7")
+  if (bodyDeviceIp) {
+    const cleanBodyIp = cleanIPv4(bodyDeviceIp);
+    if (cleanBodyIp) {
+      const match = allDevs.find(d => cleanIPv4(d.ip) === cleanBodyIp);
+      if (match) {
+        console.log(`[RESOLVER OK] Torniquete resuelto por ipAddress en Payload (${cleanBodyIp}): "${match.name}" (ID ${match.id})`);
+        return match;
+      }
+    }
+  }
+
+  // 3. Pista en cuerpo de la notificación (deviceName, deviceNo, etc.)
   if (bodyDeviceHint) {
     const hint = String(bodyDeviceHint).trim();
     const numId = parseInt(hint, 10);
@@ -454,7 +478,7 @@ async function executeAccessValidation(reqInfo, clientIp, device = null) {
 
   // 1. Identificar el dispositivo MinMoe que origina la solicitud si no fue inyectado
   if (!device) {
-    device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
+    device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice, reqInfo.bodyDeviceIp);
   }
 
   const deviceId = device ? device.id : null;
@@ -625,19 +649,20 @@ async function processAccessRequest(reqInfo, clientIp) {
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
-  const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
+  const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice, reqInfo.bodyDeviceIp);
   const deviceId = device ? device.id : null;
   const deviceName = device ? device.name : 'Torniquete';
 
   logEvent('info', `=== Solicitud de acceso [${deviceName}]: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`, deviceId, deviceName);
 
   const cleanUserId = String(userId).trim();
+  const dedupKey = `${deviceId || 'all'}_${cleanUserId}`;
 
-  // 1. Deduplicación concurrente
-  if (inFlightRequests.has(cleanUserId)) {
-    logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`, deviceId, deviceName);
+  // 1. Deduplicación concurrente por torniquete
+  if (inFlightRequests.has(dedupKey)) {
+    logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} en ${deviceName} (Serial: ${serialNo}). Reutilizando validación activa...`, deviceId, deviceName);
     try {
-      const inFlightResult = await inFlightRequests.get(cleanUserId);
+      const inFlightResult = await inFlightRequests.get(dedupKey);
       if (serialNo && serialNo !== inFlightResult.serialNo) {
         if (device && device.ip && device.username && device.password) {
           deviceHelper.sendRemoteCheck(
@@ -654,11 +679,11 @@ async function processAccessRequest(reqInfo, clientIp) {
     } catch (_) {}
   }
 
-  // 2. Cooldown anti-rebote: Si ya se autorizó este alumno hace menos de 2.5 segundos
-  if (recentVerifications.has(cleanUserId)) {
-    const recent = recentVerifications.get(cleanUserId);
+  // 2. Cooldown anti-rebote: Si ya se autorizó este alumno en ESTE torniquete hace menos de 2.5 segundos
+  if (recentVerifications.has(dedupKey)) {
+    const recent = recentVerifications.get(dedupKey);
     if (recent.result && recent.result.authorized && (Date.now() - recent.timestamp < 2500)) {
-      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`, deviceId, deviceName);
+      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} en ${deviceName} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`, deviceId, deviceName);
       if (serialNo && device && device.ip && device.username && device.password) {
         deviceHelper.sendRemoteCheck(
           device.ip,
@@ -675,16 +700,16 @@ async function processAccessRequest(reqInfo, clientIp) {
 
   // 3. Ejecutar validación y almacenar promesa en vuelo
   const validationPromise = executeAccessValidation(reqInfo, clientIp, device);
-  inFlightRequests.set(cleanUserId, validationPromise);
+  inFlightRequests.set(dedupKey, validationPromise);
 
   try {
     const result = await validationPromise;
     if (result && result.authorized) {
-      recentVerifications.set(cleanUserId, { result, timestamp: Date.now() });
+      recentVerifications.set(dedupKey, { result, timestamp: Date.now() });
     }
     return result;
   } finally {
-    inFlightRequests.delete(cleanUserId);
+    inFlightRequests.delete(dedupKey);
   }
 }
 
@@ -696,7 +721,7 @@ const handleDevicePOST = async (req, res) => {
   const clientIp = getClientIp(req);
 
   if (reqInfo.isHeartbeat) {
-    const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
+    const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice, reqInfo.bodyDeviceIp);
     const deviceId = device ? device.id : null;
     const deviceName = device ? device.name : null;
     broadcastHeartbeat(deviceId, deviceName, clientIp);
