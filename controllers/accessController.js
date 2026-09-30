@@ -1,6 +1,6 @@
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
-const { logEvent, broadcastFeedback, broadcastVerifying, sseClients } = require('../utils/logger');
+const { logEvent, broadcastFeedback, broadcastVerifying, broadcastHeartbeat, sseClients } = require('../utils/logger');
 
 // Control de concurrencia y rebotes múltiples del lector
 const inFlightRequests = new Map();
@@ -150,13 +150,13 @@ function extractDeviceRequestInfo(req) {
           if (root.QRCode || root.qrCode || root.qrCodeContent) eventType = 'qrCode';
           else if (root.barcode || root.barCode) eventType = 'barcode';
         }
-
-        bodyDevice = root.deviceId || root.device_id || root.device ||
-                     root.deviceName || root.DeviceName || 
-                     root.deviceNo || root.DeviceNo || 
-                     root.devIndex || root.DevIndex || 
-                     root.ipAddress || root.devIp || root.netId || root.subDevId;
       }
+
+      bodyDevice = root.deviceId || root.device_id || root.device ||
+                   root.deviceName || root.DeviceName || 
+                   root.deviceNo || root.DeviceNo || 
+                   root.devIndex || root.DevIndex || 
+                   root.ipAddress || root.devIp || root.netId || root.subDevId;
     }
   }
 
@@ -169,7 +169,7 @@ function extractDeviceRequestInfo(req) {
                  req.body.ipAddress || req.body.devIp;
   }
 
-  // Fallback: Si no se encuentra userId o bodyDevice, buscar en el cuerpo sin procesar
+  // Fallback: Si no se encuentra userId en credenciales, buscar en el cuerpo sin procesar
   if (!isHeartbeat && req.rawBody) {
     // 1. Extraer employeeNoString o employeeNo o userNo
     if (!userId) {
@@ -227,17 +227,17 @@ function extractDeviceRequestInfo(req) {
         eventType = modeMatch[1].trim();
       }
     }
+  }
 
-    // Extraer pistas de torniquete del cuerpo Hikvision (deviceId, deviceName, deviceNo, ipAddress)
-    if (!bodyDevice) {
-      const devIdMatch = req.rawBody.match(/<deviceId[^>]*>([^<]+)<\/deviceId>/i) ||
-                         req.rawBody.match(/"deviceId"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
-                         req.rawBody.match(/<device_id[^>]*>([^<]+)<\/device_id>/i) ||
-                         req.rawBody.match(/"device_id"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
-                         req.rawBody.match(/"device"\s*:\s*["']?([^"',\s}]+)["']?/i);
-      if (devIdMatch && devIdMatch[1]) {
-        bodyDevice = devIdMatch[1].trim();
-      }
+  // Extraer pistas de torniquete del cuerpo sin procesar (incluso si es un latido heartbeat)
+  if (!bodyDevice && req.rawBody) {
+    const devIdMatch = req.rawBody.match(/<deviceId[^>]*>([^<]+)<\/deviceId>/i) ||
+                       req.rawBody.match(/"deviceId"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                       req.rawBody.match(/<device_id[^>]*>([^<]+)<\/device_id>/i) ||
+                       req.rawBody.match(/"device_id"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                       req.rawBody.match(/"device"\s*:\s*["']?([^"',\s}]+)["']?/i);
+    if (devIdMatch && devIdMatch[1]) {
+      bodyDevice = devIdMatch[1].trim();
     }
     if (!bodyDevice) {
       const devNameMatch = req.rawBody.match(/<deviceName[^>]*>([^<]+)<\/deviceName>/i) ||
@@ -278,16 +278,23 @@ function extractDeviceRequestInfo(req) {
   }
 
   // Pista de torniquete por parámetros, query, headers o URL
+  const nonDeviceKeywords = ['event', 'events', 'isapi', 'remotecheck', 'events-stream', 'logs-stream'];
   let deviceId = (req.params && req.params.id) ? req.params.id : null;
+  if (deviceId && nonDeviceKeywords.includes(String(deviceId).toLowerCase())) {
+    deviceId = null;
+  }
   if (!deviceId && req.query) {
     deviceId = req.query.deviceId || req.query.device || req.query.id || null;
+  }
+  if (deviceId && nonDeviceKeywords.includes(String(deviceId).toLowerCase())) {
+    deviceId = null;
   }
   if (!deviceId && req.headers) {
     deviceId = req.headers['x-device-id'] || req.headers['x-device-name'] || req.headers['x-device'] || null;
   }
   if (!deviceId && (req.originalUrl || req.url)) {
     const urlMatch = (req.originalUrl || req.url).match(/\/(?:device|devices)\/([^\/?#]+)/i);
-    if (urlMatch && urlMatch[1] && urlMatch[1] !== 'events-stream' && urlMatch[1] !== 'logs-stream') {
+    if (urlMatch && urlMatch[1] && !nonDeviceKeywords.includes(urlMatch[1].toLowerCase())) {
       deviceId = decodeURIComponent(urlMatch[1]);
     }
   }
@@ -689,6 +696,12 @@ const handleDevicePOST = async (req, res) => {
   const clientIp = getClientIp(req);
 
   if (reqInfo.isHeartbeat) {
+    const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
+    const deviceId = device ? device.id : null;
+    const deviceName = device ? device.name : null;
+    broadcastHeartbeat(deviceId, deviceName, clientIp);
+    console.log(`[HEARTBEAT] Latido recibido de "${deviceName || 'Desconocido'}" (ID: ${deviceId || 'N/A'}, IP: ${clientIp})`);
+
     const isJsonRequested = req.url.includes('format=json') || 
                             (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) ||
                             (req.rawBody && req.rawBody.includes('application/json'));

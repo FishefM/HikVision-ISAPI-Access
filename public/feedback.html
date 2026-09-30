@@ -331,6 +331,12 @@
       100% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0); }
     }
 
+    @keyframes pulse-green {
+      0% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.15); }
+      100% { opacity: 0.4; transform: scale(0.9); }
+    }
+
     @keyframes pulse-verifying {
       0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.6); }
       70% { box-shadow: 0 0 0 30px rgba(56, 189, 248, 0); }
@@ -381,6 +387,10 @@
   <button class="device-pill" id="btn-device-selector" onclick="openDeviceModal()" title="Configurar torniquete asignado a esta pantalla">
     <i data-lucide="cpu" style="width: 16px; height: 16px;"></i>
     <span id="current-device-label">Todos los Torniquetes</span>
+    <span id="heartbeat-badge" style="display: none; align-items: center; gap: 5px; font-size: 0.75rem; background: rgba(0, 230, 118, 0.15); color: #00e676; border: 1px solid rgba(0, 230, 118, 0.4); border-radius: 999px; padding: 2px 7px; margin-left: 4px;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #00e676; display: inline-block; animation: pulse-green 1.5s infinite;"></span>
+      <span id="heartbeat-time">--:--:--</span>
+    </span>
     <i data-lucide="chevron-down" style="width: 14px; height: 14px; opacity: 0.7;"></i>
   </button>
 
@@ -401,6 +411,10 @@
       <!-- Main Messages -->
       <h2 class="status-title" id="status-title" style="margin-top: 0.5rem;">Presente su Credencial</h2>
       <div id="standby-device-subtitle" style="font-size: 1.15rem; color: var(--accent-blue); font-weight: 500; display: none;"></div>
+      <div id="standby-heartbeat" style="font-size: 0.85rem; color: #8fa0dd; margin-top: 0.4rem; display: none; align-items: center; justify-content: center; gap: 0.4rem;">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #00e676; display: inline-block;"></span>
+        <span id="standby-heartbeat-text">Hardware en línea</span>
+      </div>
       <h1 class="user-name" id="user-display" style="display: none;"></h1>
       <p class="sub-message" id="sub-message" style="display: none;"></p>
       
@@ -548,9 +562,15 @@
     const deviceModal = document.getElementById('device-modal');
     const devicesOptionsList = document.getElementById('devices-options-list');
 
+    const heartbeatBadge = document.getElementById('heartbeat-badge');
+    const heartbeatTime = document.getElementById('heartbeat-time');
+    const standbyHeartbeat = document.getElementById('standby-heartbeat');
+    const standbyHeartbeatText = document.getElementById('standby-heartbeat-text');
+
     let resetTimer = null;
     let availableDevices = [];
     let currentDeviceId = null; // null or 'all' for global, or specific number ID
+    let lastHeartbeatInfo = null;
 
     // Reset back to standby state
     function resetToStandby() {
@@ -570,6 +590,13 @@
         }
       } else {
         standbyDeviceSubtitle.style.display = 'none';
+      }
+
+      if (lastHeartbeatInfo && standbyHeartbeat && standbyHeartbeatText) {
+        standbyHeartbeatText.textContent = `En línea • Último latido: ${lastHeartbeatInfo.time}`;
+        standbyHeartbeat.style.display = 'inline-flex';
+      } else if (standbyHeartbeat) {
+        standbyHeartbeat.style.display = 'none';
       }
 
       userDisplay.style.display = 'none';
@@ -592,6 +619,10 @@
 
     function selectDevice(devId) {
       currentDeviceId = devId;
+      lastHeartbeatInfo = null;
+      if (heartbeatBadge) heartbeatBadge.style.display = 'none';
+      if (standbyHeartbeat) standbyHeartbeat.style.display = 'none';
+
       if (devId && devId !== 'all') {
         localStorage.setItem('feedback_device_id', String(devId));
         const newUrl = `${window.location.pathname}?device=${devId}`;
@@ -686,6 +717,7 @@
       statusTitle.textContent = deviceName ? `Credencial Leída • ${deviceName}` : 'Credencial Leída';
       statusTitle.style.display = 'block';
       standbyDeviceSubtitle.style.display = 'none';
+      if (standbyHeartbeat) standbyHeartbeat.style.display = 'none';
 
       userDisplay.textContent = name || '';
       userDisplay.style.display = name ? 'block' : 'none';
@@ -707,6 +739,7 @@
       if (resetTimer) clearTimeout(resetTimer);
 
       standbyDeviceSubtitle.style.display = 'none';
+      if (standbyHeartbeat) standbyHeartbeat.style.display = 'none';
 
       if (authorized) {
         // Success State
@@ -738,6 +771,39 @@
       resetTimer = setTimeout(resetToStandby, 4000);
     }
 
+    // Trigger Heartbeat / Hardware Keepalive Visual & Console Indicator
+    function handleHeartbeatEvent(data) {
+      const timeFormatted = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+      console.log(`%c[SSE Heartbeat] %cLatido de hardware recibido de "${data.deviceName || 'Torniquete'}" (ID: ${data.deviceId || 'N/A'}, IP: ${data.ip || 'N/A'}) a las ${timeFormatted}`, 'color: #00e676; font-weight: bold;', 'color: #ffffff;');
+
+      // Filtrar si la pantalla está asociada a un torniquete específico
+      if (currentDeviceId && currentDeviceId !== 'all') {
+        const matchesId = data.deviceId && String(data.deviceId) === String(currentDeviceId);
+        const matchesName = data.deviceName && availableDevices.some(d => String(d.id) === String(currentDeviceId) && d.name.trim().toLowerCase() === data.deviceName.trim().toLowerCase());
+        if (!matchesId && !matchesName) {
+          return;
+        }
+      }
+
+      lastHeartbeatInfo = {
+        time: timeFormatted,
+        deviceName: data.deviceName || 'Torniquete',
+        deviceId: data.deviceId,
+        ip: data.ip
+      };
+
+      if (heartbeatBadge && heartbeatTime) {
+        heartbeatTime.textContent = timeFormatted;
+        heartbeatBadge.style.display = 'inline-flex';
+        heartbeatBadge.title = `Último latido de "${data.deviceName || 'Torniquete'}" (${data.ip || 'IP'}): ${timeFormatted}`;
+      }
+
+      if (standbyHeartbeat && standbyHeartbeatText && screenViewport.classList.contains('state-standby')) {
+        standbyHeartbeatText.textContent = `En línea • Último latido: ${timeFormatted}`;
+        standbyHeartbeat.style.display = 'inline-flex';
+      }
+    }
+
     let sseSource = null;
 
     // Establish Server-Sent Events stream connection to the backend
@@ -758,6 +824,12 @@
       sseSource.onmessage = function(event) {
         try {
           const data = JSON.parse(event.data);
+          // Intercept heartbeat events
+          if (data.type === 'heartbeat') {
+            handleHeartbeatEvent(data);
+            return;
+          }
+
           // Intercept access feedback events
           if (data.type === 'access_feedback') {
             // Filtrar por torniquete si la pantalla está vinculada a un torniquete específico

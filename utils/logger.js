@@ -124,10 +124,41 @@ function broadcastVerifying(name, userId, eventType, deviceId = null, deviceName
   });
 }
 
+/**
+ * Broadcasts a heartbeat signal from a MinMoe hardware device to eligible SSE clients.
+ * Sends both an SSE comment (: heartbeat ...) and a data event for visual monitors.
+ */
+function broadcastHeartbeat(deviceId, deviceName, clientIp) {
+  const timestamp = new Date().toLocaleTimeString();
+  const comment = `: heartbeat from "${deviceName || 'Torniquete'}" (ID: ${deviceId || 'N/A'}, IP: ${clientIp || 'N/A'}) at ${timestamp}\n\n`;
+  const heartbeatObj = {
+    type: 'heartbeat',
+    deviceId,
+    deviceName,
+    ip: clientIp,
+    timestamp: new Date().toISOString()
+  };
+  const data = JSON.stringify(heartbeatObj);
+
+  sseClients.forEach(client => {
+    // Si el cliente está filtrando por un torniquete específico
+    if (!isClientEligibleForDevice(client, deviceId, deviceName)) {
+      return;
+    }
+    try {
+      // 1. Escribir comentario SSE (visible en logs de stream y curl)
+      client.write(comment);
+      // 2. Escribir evento data (interpretable por pantalla feedback.html)
+      client.write(`data: ${data}\n\n`);
+    } catch (_) {}
+  });
+}
+
 module.exports = {
   logEvent,
   broadcastFeedback,
   broadcastVerifying,
+  broadcastHeartbeat,
   isClientEligibleForDevice,
   sseClients
 };

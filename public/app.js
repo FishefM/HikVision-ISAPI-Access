@@ -161,6 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const logData = JSON.parse(event.data);
         if (logData.type === 'access_feedback') return;
+        if (logData.type === 'heartbeat') {
+          const hbTime = logData.timestamp ? new Date(logData.timestamp).toLocaleTimeString() : '';
+          appendConsoleLog('info', `[Heartbeat] Latido recibido de "${logData.deviceName || 'Torniquete'}" (ID: ${logData.deviceId || 'N/A'}, IP: ${logData.ip || 'N/A'})`, hbTime);
+          return;
+        }
         const timeStr = logData.timestamp ? (logData.timestamp.includes(' ') ? logData.timestamp.split(' ')[1] : logData.timestamp) : '';
         appendConsoleLog(logData.type, logData.message, timeStr);
         
