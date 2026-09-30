@@ -438,6 +438,19 @@ const getUsers = (filter, deviceId, search = '') => new Promise((res, rej) => {
   });
 });
 
+const getUserByPk = (id) => new Promise((res, rej) => {
+  if (!id) return res(null);
+  const numId = Number(id);
+  db.get("SELECT * FROM users WHERE id = ?", [numId], async (err, row) => {
+    if (err) return rej(err);
+    if (row) {
+      const device_ids = await getUserDeviceIds(row.user_id).catch(() => []);
+      return res({ ...row, device_ids });
+    }
+    res(null);
+  });
+});
+
 const getUserById = (userId) => new Promise((res, rej) => {
   if (!userId) return res(null);
   const cleanId = String(userId).trim();
@@ -849,6 +862,7 @@ module.exports = {
   isUserAllowedOnDevice,
   getUsers,
   getUserById,
+  getUserByPk,
   addUser,
   updateUser,
   deleteUser,

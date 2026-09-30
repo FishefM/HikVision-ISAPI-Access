@@ -163,36 +163,46 @@ async function addUser(req, res) {
     });
   }
 
-  // Paso 2: Sincronización con el hardware Hikvision MinMoe de cada torniquete asignado
+  // Paso 2: Sincronización con el hardware Hikvision MinMoe de cada torniquete asignado en paralelo
   let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
   const targetDevices = allDevices.filter(d => targetDeviceIds.includes(d.id));
 
   if (targetDevices.length > 0) {
-    let syncedDevicesCount = 0;
-    for (const dev of targetDevices) {
+    const syncPromises = targetDevices.map(async (dev) => {
       if (dev.ip && dev.username && dev.password) {
         logEvent('info', `[MinMoe - ${dev.name}] Iniciando sincronización de "${name}" (${user_id}) en ${dev.ip}:${dev.port || 80}...`);
-        
-        const syncRes = await deviceHelper.syncFullUserToDevice({
-          device_ip: dev.ip,
-          device_port: dev.port || 80,
-          device_user: dev.username,
-          device_password: dev.password
-        }, user);
+        try {
+          const syncRes = await deviceHelper.syncFullUserToDevice({
+            device_ip: dev.ip,
+            device_port: dev.port || 80,
+            device_user: dev.username,
+            device_password: dev.password
+          }, user);
+          return { dev, syncRes };
+        } catch (e) {
+          return { dev, syncRes: { synced: false, summary: e.message, diagnostics: [e.message] } };
+        }
+      }
+      return { dev, syncRes: { synced: false, summary: 'Credenciales incompletas', diagnostics: ['Faltan credenciales o IP del lector.'] } };
+    });
 
+    const settled = await Promise.allSettled(syncPromises);
+    let syncedDevicesCount = 0;
+    for (const item of settled) {
+      if (item.status === 'fulfilled' && item.value) {
+        const { dev, syncRes } = item.value;
         if (syncRes.synced) {
           syncedDevicesCount++;
           logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${name}" sincronizado con éxito (Usuario y Tarjeta).`);
         } else {
           logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${syncRes.summary}`);
         }
-
-        syncRes.diagnostics.forEach(diag => {
-          deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
-          logEvent(syncRes.synced ? 'info' : 'warning', `  └─ [${dev.name}] ${diag}`);
-        });
-      } else {
-        deviceSyncResult.diagnostics.push(`[${dev.name}] Faltan credenciales o IP del lector.`);
+        if (syncRes.diagnostics) {
+          syncRes.diagnostics.forEach(diag => {
+            deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
+            logEvent(syncRes.synced ? 'info' : 'warning', `  └─ [${dev.name}] ${diag}`);
+          });
+        }
       }
     }
 
@@ -243,7 +253,7 @@ async function updateUser(req, res) {
   }
 
   // Si no se proporcionó user_id, conservar el existente o generarlo/extraerlo
-  const existing = await dbHelper.getUserById(id);
+  const existing = (await dbHelper.getUserByPk(id)) || (await dbHelper.getUserById(id));
   if (!user_id) {
     if (existing && existing.user_id) {
       user_id = existing.user_id;
@@ -296,33 +306,46 @@ async function updateUser(req, res) {
     return res.status(500).json({ error: `Error de base de datos al actualizar: ${dbErr.message}` });
   }
 
-  // Paso 2: Sincronizar con el hardware MinMoe de los torniquetes asignados
+  // Paso 2: Sincronizar con el hardware MinMoe de los torniquetes asignados en paralelo
   const currentDeviceIds = targetDeviceIds !== null ? targetDeviceIds : (existing ? existing.device_ids : []);
   const targetDevices = allDevices.filter(d => currentDeviceIds.includes(d.id));
   
   let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
   if (targetDevices.length > 0) {
-    let syncedDevicesCount = 0;
-    for (const dev of targetDevices) {
+    const syncPromises = targetDevices.map(async (dev) => {
       if (dev.ip && dev.username && dev.password) {
         logEvent('info', `[MinMoe - ${dev.name}] Actualizando datos de "${name}" (${user_id}) en ${dev.ip}...`);
-        const syncRes = await deviceHelper.syncFullUserToDevice({
-          device_ip: dev.ip,
-          device_port: dev.port || 80,
-          device_user: dev.username,
-          device_password: dev.password
-        }, { user_id, name, image_file });
+        try {
+          const syncRes = await deviceHelper.syncFullUserToDevice({
+            device_ip: dev.ip,
+            device_port: dev.port || 80,
+            device_user: dev.username,
+            device_password: dev.password
+          }, { user_id, name, image_file });
+          return { dev, syncRes };
+        } catch (e) {
+          return { dev, syncRes: { synced: false, summary: e.message, diagnostics: [e.message] } };
+        }
+      }
+      return { dev, syncRes: { synced: false, summary: 'Credenciales incompletas', diagnostics: ['Faltan datos de conexión'] } };
+    });
 
+    const settled = await Promise.allSettled(syncPromises);
+    let syncedDevicesCount = 0;
+    for (const item of settled) {
+      if (item.status === 'fulfilled' && item.value) {
+        const { dev, syncRes } = item.value;
         if (syncRes.synced) {
           syncedDevicesCount++;
           logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${name}" actualizado con éxito.`);
         } else {
           logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${syncRes.summary}`);
         }
-
-        syncRes.diagnostics.forEach(diag => {
-          deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
-        });
+        if (syncRes.diagnostics) {
+          syncRes.diagnostics.forEach(diag => {
+            deviceSyncResult.diagnostics.push(`[${dev.name}] ${diag}`);
+          });
+        }
       }
     }
     deviceSyncResult.synced = syncedDevicesCount === targetDevices.length;

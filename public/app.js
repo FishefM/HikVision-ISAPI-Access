@@ -706,27 +706,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (window.lucide) window.lucide.createIcons();
 
-    // Attach Event Listeners to actions
+    // Attach Event Listeners to actions with robust data-id matching
     document.querySelectorAll('.qr-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const id = parseInt(e.currentTarget.getAttribute('data-id'));
-        const user = usersList.find(u => u.id === id);
+        const id = btn.getAttribute('data-id');
+        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
         if (user) showUserQR(user);
       });
     });
 
     document.querySelectorAll('.edit-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const id = parseInt(e.currentTarget.getAttribute('data-id'));
-        const user = usersList.find(u => u.id === id);
-        if (user) showUserForm(user);
+        const id = btn.getAttribute('data-id');
+        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+        if (user) {
+          showUserForm(user);
+        } else {
+          console.warn('[EDIT ALUMNO] No se encontró alumno para ID:', id);
+        }
       });
     });
 
     document.querySelectorAll('.delete-user-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
-        const id = parseInt(e.currentTarget.getAttribute('data-id'));
-        const user = usersList.find(u => u.id === id);
+        const id = btn.getAttribute('data-id');
+        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
         if (user && confirm(`¿Está seguro de eliminar al alumno "${user.name}" de la base de datos local y de sus torniquetes asignados?`)) {
           appendConsoleLog('info', `Eliminando a "${user.name}" (ID: ${user.user_id})...`);
           try {
@@ -898,16 +902,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
+    userFormContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    userFormContainer.classList.add('form-highlight');
+    setTimeout(() => userFormContainer.classList.remove('form-highlight'), 1800);
+
+    const submitBtn = userForm.querySelector('button[type="submit"]');
+
     if (user) {
-      userFormTitle.textContent = 'Editar Alumno';
+      userFormTitle.textContent = `Editar Datos del Alumno: ${user.name || ''}`;
+      if (submitBtn) submitBtn.textContent = 'Guardar Cambios del Alumno';
+
       userDbIdInput.value = user.id;
       userIdInput.value = user.user_id || '';
       if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = user.acuaticapp_id || '';
       
-      // Separar nombres o usar campos existentes
-      if (userFirstNameInput) userFirstNameInput.value = user.first_name || user.name || '';
-      if (userSecondNameInput) userSecondNameInput.value = user.second_name || '';
-      if (userLastNameInput) userLastNameInput.value = user.last_name || '';
+      // Separar nombres o usar campos existentes inteligentemente
+      let fName = user.first_name || '';
+      let sName = user.second_name || '';
+      let lName = user.last_name || '';
+      if (!fName && user.name) {
+        const parts = user.name.trim().split(/\s+/);
+        if (parts.length === 1) {
+          fName = parts[0];
+        } else if (parts.length === 2) {
+          fName = parts[0];
+          sName = parts[1];
+        } else if (parts.length === 3) {
+          fName = parts[0];
+          sName = parts[1];
+          lName = parts[2];
+        } else if (parts.length >= 4) {
+          fName = parts.slice(0, 2).join(' ');
+          sName = parts[2];
+          lName = parts.slice(3).join(' ');
+        }
+      }
+
+      if (userFirstNameInput) userFirstNameInput.value = fName;
+      if (userSecondNameInput) userSecondNameInput.value = sName;
+      if (userLastNameInput) userLastNameInput.value = lName;
       if (userMatriculaInput) userMatriculaInput.value = user.matricula || user.user_id || '';
       if (userPhoneInput) userPhoneInput.value = user.phone || '';
       if (userImageFileInput) userImageFileInput.value = user.image_file || '';
@@ -928,8 +961,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       updateUserIdPreview();
+      setTimeout(() => {
+        if (userFirstNameInput) userFirstNameInput.focus();
+      }, 150);
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Alumno';
+      if (submitBtn) submitBtn.textContent = 'Guardar Alumno';
+
       userForm.reset();
       userDbIdInput.value = '';
       userIdInput.value = '';
@@ -957,6 +995,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       updateUserIdPreview();
+      setTimeout(() => {
+        if (userFirstNameInput) userFirstNameInput.focus();
+      }, 150);
     }
   }
 
@@ -965,6 +1006,8 @@ document.addEventListener('DOMContentLoaded', () => {
     userForm.reset();
     userDbIdInput.value = '';
     userIdInput.value = '';
+    const submitBtn = userForm.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.textContent = 'Guardar Alumno';
     if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = '';
     if (userIdPreview) userIdPreview.textContent = '';
   }
@@ -975,6 +1018,14 @@ document.addEventListener('DOMContentLoaded', () => {
   userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const dbId = userDbIdInput.value;
+    const submitBtn = userForm.querySelector('button[type="submit"]');
+    const originalBtnHtml = submitBtn ? submitBtn.innerHTML : 'Guardar Alumno';
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:14px;height:14px;"></i> Guardando...`;
+      if (window.lucide) window.lucide.createIcons();
+    }
     
     let apiUrlValue = userApiUrlInput ? userApiUrlInput.value.trim() : '';
     if (!apiUrlValue) {
@@ -1063,6 +1114,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       alert(`Error de red al guardar: ${err.message}`);
       appendConsoleLog('error', `Excepción de red al guardar: ${err.message}`);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   });
 

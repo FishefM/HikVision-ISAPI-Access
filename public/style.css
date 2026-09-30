@@ -1109,6 +1109,12 @@ select.form-input {
   animation: slideDown 0.3s ease-out;
 }
 
+.form-panel.form-highlight {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 25px rgba(0, 210, 255, 0.45) !important;
+  transition: all 0.4s ease;
+}
+
 .hidden {
   display: none !important;
 }

@@ -263,7 +263,7 @@ async function sendISAPIGenericRequest(deviceIp, devicePort, username, password,
     headers: mergedHeaders,
     data: data,
     validateStatus: (status) => status >= 200 && status < 500, // Permit 401 response for digest challenge
-    timeout: extraConfig.timeout || 15000, // 15 second timeout for image transfers
+    timeout: extraConfig.timeout || 4500, // 4.5 second timeout default (override with extraConfig.timeout for large transfers)
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
     ...(extraConfig.responseType ? { responseType: extraConfig.responseType } : {})
