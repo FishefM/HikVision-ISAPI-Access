@@ -109,6 +109,7 @@ function extractDeviceRequestInfo(req) {
   let serialNo = '1';
   let eventType = 'unknown';
   let isHeartbeat = false;
+  let bodyDevice = null;
 
   // Detecta si la solicitud es un latido (heartbeat)
   if (req.rawBody && /heartbeat/i.test(req.rawBody)) {
