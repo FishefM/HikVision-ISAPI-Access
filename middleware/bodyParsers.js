@@ -12,6 +12,10 @@ function configureBodyParsers(app) {
       req.path === '/' || 
       req.path === '/event' || 
       req.path === '/api/event' || 
+      req.path.startsWith('/device') || 
+      req.path.startsWith('/devices') || 
+      req.path.startsWith('/api/device') || 
+      req.path.startsWith('/api/devices') || 
       req.path.startsWith('/ISAPI') || 
       req.path === '/remoteCheck';
 

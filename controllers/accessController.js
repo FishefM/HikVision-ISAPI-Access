@@ -151,7 +151,8 @@ function extractDeviceRequestInfo(req) {
           else if (root.barcode || root.barCode) eventType = 'barcode';
         }
 
-        bodyDevice = root.deviceName || root.DeviceName || 
+        bodyDevice = root.deviceId || root.device_id || root.device ||
+                     root.deviceName || root.DeviceName || 
                      root.deviceNo || root.DeviceNo || 
                      root.devIndex || root.DevIndex || 
                      root.ipAddress || root.devIp || root.netId || root.subDevId;
@@ -161,7 +162,8 @@ function extractDeviceRequestInfo(req) {
 
   // Comprobar también en el objeto raíz req.body si no se encontró dentro de root
   if (!bodyDevice && req.body) {
-    bodyDevice = req.body.deviceName || req.body.DeviceName ||
+    bodyDevice = req.body.deviceId || req.body.device_id || req.body.device ||
+                 req.body.deviceName || req.body.DeviceName ||
                  req.body.deviceNo || req.body.DeviceNo ||
                  req.body.devIndex || req.body.DevIndex ||
                  req.body.ipAddress || req.body.devIp;
@@ -226,7 +228,17 @@ function extractDeviceRequestInfo(req) {
       }
     }
 
-    // Extraer pistas de torniquete del cuerpo Hikvision (deviceName, deviceNo, ipAddress)
+    // Extraer pistas de torniquete del cuerpo Hikvision (deviceId, deviceName, deviceNo, ipAddress)
+    if (!bodyDevice) {
+      const devIdMatch = req.rawBody.match(/<deviceId[^>]*>([^<]+)<\/deviceId>/i) ||
+                         req.rawBody.match(/"deviceId"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                         req.rawBody.match(/<device_id[^>]*>([^<]+)<\/device_id>/i) ||
+                         req.rawBody.match(/"device_id"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                         req.rawBody.match(/"device"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (devIdMatch && devIdMatch[1]) {
+        bodyDevice = devIdMatch[1].trim();
+      }
+    }
     if (!bodyDevice) {
       const devNameMatch = req.rawBody.match(/<deviceName[^>]*>([^<]+)<\/deviceName>/i) ||
                            req.rawBody.match(/"deviceName"\s*:\s*["']?([^"',\s}]+)["']?/i);
@@ -360,12 +372,21 @@ async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
     const numId = parseInt(hint, 10);
     if (!isNaN(numId)) {
       const match = allDevs.find(d => Number(d.id) === numId);
-      if (match) return match;
+      if (match) {
+        console.log(`[RESOLVER OK] Torniquete resuelto por URL/Query/Header ID: "${match.name}" (ID ${match.id})`);
+        return match;
+      }
     }
     const nameMatch = allDevs.find(d => matchDeviceName(d.name, hint));
-    if (nameMatch) return nameMatch;
+    if (nameMatch) {
+      console.log(`[RESOLVER OK] Torniquete resuelto por Nombre en URL/Query/Header: "${nameMatch.name}" (ID ${nameMatch.id})`);
+      return nameMatch;
+    }
     const ipMatch = allDevs.find(d => cleanIPv4(d.ip) === cleanIPv4(hint));
-    if (ipMatch) return ipMatch;
+    if (ipMatch) {
+      console.log(`[RESOLVER OK] Torniquete resuelto por IP en URL/Query/Header: "${ipMatch.name}" (ID ${ipMatch.id})`);
+      return ipMatch;
+    }
   }
 
   // 2. Pista en cuerpo de la notificación (deviceName, deviceNo, etc.)
@@ -374,12 +395,21 @@ async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
     const numId = parseInt(hint, 10);
     if (!isNaN(numId)) {
       const match = allDevs.find(d => Number(d.id) === numId);
-      if (match) return match;
+      if (match) {
+        console.log(`[RESOLVER OK] Torniquete resuelto por ID en Payload: "${match.name}" (ID ${match.id})`);
+        return match;
+      }
     }
     const nameMatch = allDevs.find(d => matchDeviceName(d.name, hint));
-    if (nameMatch) return nameMatch;
+    if (nameMatch) {
+      console.log(`[RESOLVER OK] Torniquete resuelto por Nombre en Payload: "${nameMatch.name}" (ID ${nameMatch.id})`);
+      return nameMatch;
+    }
     const ipMatch = allDevs.find(d => cleanIPv4(d.ip) === cleanIPv4(hint));
-    if (ipMatch) return ipMatch;
+    if (ipMatch) {
+      console.log(`[RESOLVER OK] Torniquete resuelto por IP en Payload: "${ipMatch.name}" (ID ${ipMatch.id})`);
+      return ipMatch;
+    }
   }
 
   // 3. Pista por dirección IP del lector físico (coincidencia estricta limpia)
@@ -390,17 +420,23 @@ async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
         const devIp = cleanIPv4(d.ip);
         return devIp === cleanClient;
       });
-      if (match) return match;
+      if (match) {
+        console.log(`[RESOLVER OK] Torniquete resuelto por IP de origen (${cleanClient}): "${match.name}" (ID ${match.id})`);
+        return match;
+      }
     }
   }
 
   // 4. Dispositivo predeterminado (fallback)
+  let def = null;
   try {
-    const def = await dbHelper.getDefaultDevice();
-    if (def) return def;
+    def = await dbHelper.getDefaultDevice();
   } catch (_) {}
 
-  return allDevs[0] || null;
+  const finalDevice = def || allDevs[0] || null;
+  console.warn(`[RESOLVER WARN] Petición entrante desde IP "${clientIp}" no coincide con torniquetes registrados. Fallback a: "${finalDevice ? finalDevice.name : 'N/A'}" (ID ${finalDevice ? finalDevice.id : 'N/A'}). Pistas: hint="${deviceIdHint || ''}", body="${bodyDeviceHint || ''}".`);
+
+  return finalDevice;
 }
 
 /**
@@ -787,8 +823,9 @@ async function testScan(req, res) {
  */
 const handleDeviceEventsStream = async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Desactivar buffer de Nginx para streaming inmediato
   res.flushHeaders();
 
   const devIdOrName = req.params.id || req.query.device || req.query.deviceId;
@@ -810,10 +847,29 @@ const handleDeviceEventsStream = async (req, res) => {
   res.targetDeviceName = resolvedName;
   sseClients.push(res);
 
+  // Enviar confirmación inmediata de enlace a la pantalla/cliente
+  try {
+    res.write(`data: ${JSON.stringify({
+      type: 'connected',
+      status: 'connected',
+      deviceId: resolvedId,
+      deviceName: resolvedName || 'Modo Global',
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+  } catch (_) {}
+
   const label = resolvedName ? `"${resolvedName}" (ID ${resolvedId})` : (resolvedId !== 'all' ? `ID ${resolvedId}` : 'modo global');
   logEvent('info', `Pantalla conectada al flujo de eventos dedicado del torniquete ${label}.`, resolvedId, resolvedName);
 
+  // Intervalo de latidos (heartbeat/keep-alive) cada 15 segundos para evitar desconexiones de proxies
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (_) {}
+  }, 15000);
+
   req.on('close', () => {
+    clearInterval(keepAlive);
     const idx = sseClients.indexOf(res);
     if (idx !== -1) sseClients.splice(idx, 1);
   });
@@ -824,8 +880,9 @@ const handleDeviceEventsStream = async (req, res) => {
  */
 const handleDeviceLogsStream = async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   const devIdOrName = req.params.id || req.query.device || req.query.deviceId;
@@ -847,7 +904,14 @@ const handleDeviceLogsStream = async (req, res) => {
   res.targetDeviceName = resolvedName;
   sseClients.push(res);
 
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch (_) {}
+  }, 15000);
+
   req.on('close', () => {
+    clearInterval(keepAlive);
     const idx = sseClients.indexOf(res);
     if (idx !== -1) sseClients.splice(idx, 1);
   });
