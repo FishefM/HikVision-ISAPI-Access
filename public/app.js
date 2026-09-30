@@ -268,32 +268,19 @@ document.addEventListener('DOMContentLoaded', () => {
       devCard.className = 'device-card';
       
       devCard.innerHTML = `
-        <div class="device-card-info">
-          <div class="device-card-header">
-            <div class="device-card-title-wrap">
-              <i data-lucide="cpu" class="device-card-icon"></i>
-              <strong class="device-card-name">${escapeHTML(dev.name)}</strong>
+        <div class="device-card-header">
+          <div class="device-card-title-wrap">
+            <div class="device-icon-box">
+              <i data-lucide="cpu"></i>
             </div>
-            ${defaultBadge}
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <strong class="device-card-name">${escapeHTML(dev.name)}</strong>
+                ${defaultBadge}
+              </div>
+              <div class="device-card-sub">${escapeHTML(dev.ip)}:${dev.port || 80} • Canal ${dev.door_channel || 1}</div>
+            </div>
           </div>
-          <div class="device-card-meta">
-            <span class="device-meta-tag"><i data-lucide="network" style="width:12px;height:12px;"></i> ${escapeHTML(dev.ip)}:${dev.port || 80}</span>
-            <span class="device-meta-tag"><i data-lucide="door-closed" style="width:12px;height:12px;"></i> Puerta ${dev.door_channel || 1}</span>
-            <span class="device-meta-tag ${dev.enable_api_open ? 'meta-success' : 'meta-muted'}">
-              <i data-lucide="${dev.enable_api_open ? 'unlock' : 'lock'}" style="width:12px;height:12px;"></i> ${dev.enable_api_open ? 'Apertura Remota ON' : 'Apertura OFF'}
-            </span>
-          </div>
-        </div>
-        <div class="device-card-actions">
-          <a href="/feedback?device=${dev.id}" target="_blank" class="btn btn-secondary btn-sm dev-action-btn" title="Abrir pantalla de visualización para ${escapeHTML(dev.name)}">
-            <i data-lucide="tv" style="width:14px;height:14px;"></i> Pantalla
-          </a>
-          <button type="button" class="btn btn-secondary btn-sm test-ping-btn dev-action-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete">
-            <i data-lucide="radio" style="width:14px;height:14px;"></i> Ping
-          </button>
-          <button type="button" class="btn btn-primary btn-sm test-open-btn dev-action-btn" data-id="${dev.id}" title="Enviar comando de apertura a este torniquete">
-            <i data-lucide="unlock" style="width:14px;height:14px;"></i> Abrir
-          </button>
           <div class="dev-card-admin-actions">
             <button type="button" class="btn btn-icon-only edit-device-btn" data-id="${dev.id}" title="Editar torniquete">
               <i data-lucide="edit" style="width:14px;height:14px;"></i>
@@ -302,6 +289,41 @@ document.addEventListener('DOMContentLoaded', () => {
               <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
             </button>
           </div>
+        </div>
+
+        <div class="device-card-body">
+          <div class="device-badge-row">
+            <span class="device-meta-tag ${dev.enable_api_open ? 'meta-success' : 'meta-muted'}">
+              <i data-lucide="${dev.enable_api_open ? 'unlock' : 'lock'}" style="width:12px;height:12px;"></i>
+              ${dev.enable_api_open ? 'Apertura Remota Habilitada' : 'Apertura Remota Desactivada'}
+            </span>
+            <span class="device-meta-tag meta-info">
+              <i data-lucide="user-check" style="width:12px;height:12px;"></i> ISAPI: ${escapeHTML(dev.username || 'admin')}
+            </span>
+          </div>
+
+          <div class="device-url-box">
+            <div class="device-url-item">
+              <span class="device-url-label"><i data-lucide="arrow-down-left" style="width:11px;height:11px;"></i> URL Eventos MinMoe:</span>
+              <code class="device-url-code" title="Clic para copiar" onclick="navigator.clipboard.writeText(this.innerText); appendConsoleLog('info', 'URL MinMoe copiada al portapapeles');">/device/${dev.id}/event</code>
+            </div>
+            <div class="device-url-item">
+              <span class="device-url-label"><i data-lucide="radio" style="width:11px;height:11px;"></i> Flujo SSE Pantalla:</span>
+              <code class="device-url-code code-sse" title="Clic para copiar" onclick="navigator.clipboard.writeText(this.innerText); appendConsoleLog('info', 'URL SSE copiada al portapapeles');">/api/devices/${dev.id}/events-stream</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="device-card-footer">
+          <a href="/feedback?device=${dev.id}" target="_blank" class="btn btn-secondary btn-sm dev-footer-btn" title="Abrir pantalla de visualización para ${escapeHTML(dev.name)}">
+            <i data-lucide="tv" style="width:14px;height:14px;"></i> Pantalla Feedback
+          </a>
+          <button type="button" class="btn btn-secondary btn-sm test-ping-btn dev-footer-btn" data-id="${dev.id}" title="Probar conexión ISAPI con este torniquete">
+            <i data-lucide="radio" style="width:14px;height:14px;"></i> Probar Ping
+          </button>
+          <button type="button" class="btn btn-primary btn-sm test-open-btn dev-footer-btn" data-id="${dev.id}" title="Enviar comando de apertura a este torniquete">
+            <i data-lucide="unlock" style="width:14px;height:14px;"></i> Abrir Puerta
+          </button>
         </div>
       `;
 

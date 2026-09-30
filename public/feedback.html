@@ -604,6 +604,7 @@
       updateDeviceIndicator();
       resetToStandby();
       closeDeviceModal();
+      connectSSE();
     }
 
     function updateDeviceIndicator() {
@@ -737,12 +738,24 @@
       resetTimer = setTimeout(resetToStandby, 4000);
     }
 
+    let sseSource = null;
+
     // Establish Server-Sent Events stream connection to the backend
     function connectSSE() {
-      console.log('Connecting to access events stream...');
-      const eventSource = new EventSource('/api/logs-stream');
+      if (sseSource) {
+        try { sseSource.close(); } catch (_) {}
+        sseSource = null;
+      }
 
-      eventSource.onmessage = function(event) {
+      let sseUrl = '/api/logs-stream';
+      if (currentDeviceId && currentDeviceId !== 'all') {
+        sseUrl = `/api/devices/${encodeURIComponent(currentDeviceId)}/events-stream`;
+      }
+
+      console.log(`Conectando a flujo de eventos SSE: ${sseUrl}`);
+      sseSource = new EventSource(sseUrl);
+
+      sseSource.onmessage = function(event) {
         try {
           const data = JSON.parse(event.data);
           // Intercept access feedback events
@@ -763,10 +776,13 @@
         }
       };
 
-      eventSource.onerror = function(err) {
-        console.error('SSE Connection lost. Reconnecting in 5 seconds...', err);
-        eventSource.close();
-        setTimeout(connectSSE, 5000);
+      sseSource.onerror = function(err) {
+        console.warn('Conexión SSE perdida o reconectando...', err);
+        if (sseSource) {
+          try { sseSource.close(); } catch (_) {}
+          sseSource = null;
+        }
+        setTimeout(connectSSE, 4000);
       };
     }
 

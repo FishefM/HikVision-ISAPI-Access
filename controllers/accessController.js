@@ -228,7 +228,11 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
-  return { userId, serialNo, eventType, isHeartbeat };
+  const deviceId = (req.params && req.params.id) 
+    ? req.params.id 
+    : (req.query && (req.query.deviceId || req.query.device) ? (req.query.deviceId || req.query.device) : null);
+
+  return { userId, serialNo, eventType, isHeartbeat, deviceId };
 }
 
 /**
@@ -253,7 +257,14 @@ async function executeAccessValidation(reqInfo, clientIp) {
   const formattedIp = cleanIPv4(clientIp);
   let device = null;
   if (reqInfo.deviceId) {
-    device = await dbHelper.getDeviceById(reqInfo.deviceId);
+    const numId = parseInt(reqInfo.deviceId, 10);
+    if (!isNaN(numId)) {
+      device = await dbHelper.getDeviceById(numId);
+    }
+    if (!device) {
+      const allDevs = await dbHelper.getDevices();
+      device = allDevs.find(d => String(d.name).toLowerCase() === String(reqInfo.deviceId).toLowerCase() || String(d.ip) === String(reqInfo.deviceId));
+    }
   }
   if (!device) {
     device = await dbHelper.getDeviceByIp(formattedIp);
@@ -434,7 +445,14 @@ async function processAccessRequest(reqInfo, clientIp) {
   const formattedIp = cleanIPv4(clientIp);
   let device = null;
   if (reqInfo.deviceId) {
-    device = await dbHelper.getDeviceById(reqInfo.deviceId);
+    const numId = parseInt(reqInfo.deviceId, 10);
+    if (!isNaN(numId)) {
+      device = await dbHelper.getDeviceById(numId);
+    }
+    if (!device) {
+      const allDevs = await dbHelper.getDevices();
+      device = allDevs.find(d => String(d.name).toLowerCase() === String(reqInfo.deviceId).toLowerCase() || String(d.ip) === String(reqInfo.deviceId));
+    }
   }
   if (!device) {
     device = await dbHelper.getDeviceByIp(formattedIp);

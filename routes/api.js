@@ -57,22 +57,61 @@ router.get('/mock-external-api/allow', accessController.mockExternalApiAllow);
 router.get('/mock-external-api/deny', accessController.mockExternalApiDeny);
 router.get('/mock-external-api/error', accessController.mockExternalApiError);
 
-// SSE Log stream connection
+// SSE Log stream connection (Global o filtrado por query ?device=1)
 router.get('/logs-stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  const filterDevId = req.query.device || req.query.deviceId || null;
+  res.targetDeviceId = filterDevId ? String(filterDevId) : null;
+
   sseClients.push(res);
-  logEvent('info', 'Panel de control conectado al flujo de eventos.');
+  const streamDesc = res.targetDeviceId ? `filtrado para torniquete ID ${res.targetDeviceId}` : 'global';
+  logEvent('info', `Cliente conectado al flujo de eventos (${streamDesc}).`);
 
   req.on('close', () => {
     const index = sseClients.indexOf(res);
     if (index !== -1) {
       sseClients.splice(index, 1);
     }
-    console.log('[INFO] Panel de control desconectado.');
+  });
+});
+
+// Dedicated SSE stream for a specific MinMoe / Torniquete
+router.get('/devices/:id/events-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  res.targetDeviceId = String(req.params.id);
+  sseClients.push(res);
+  logEvent('info', `Pantalla conectada al flujo de eventos dedicado del torniquete ID ${req.params.id}.`, req.params.id);
+
+  req.on('close', () => {
+    const index = sseClients.indexOf(res);
+    if (index !== -1) {
+      sseClients.splice(index, 1);
+    }
+  });
+});
+
+router.get('/devices/:id/logs-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  res.targetDeviceId = String(req.params.id);
+  sseClients.push(res);
+
+  req.on('close', () => {
+    const index = sseClients.indexOf(res);
+    if (index !== -1) {
+      sseClients.splice(index, 1);
+    }
   });
 });
 
