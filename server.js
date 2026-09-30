@@ -16,6 +16,9 @@ const deviceRoutes = require('./routes/device');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Enable reverse proxy support (Nginx, Caddy, Docker, Cloudflare)
+app.set('trust proxy', true);
+
 // Log every incoming HTTP request to the server terminal
 app.use(requestLogger);
 

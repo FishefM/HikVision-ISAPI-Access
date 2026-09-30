@@ -761,8 +761,16 @@
           // Intercept access feedback events
           if (data.type === 'access_feedback') {
             // Filtrar por torniquete si la pantalla está vinculada a un torniquete específico
-            if (currentDeviceId && currentDeviceId !== 'all' && data.deviceId && String(data.deviceId) !== String(currentDeviceId)) {
-              return; // Omitir eventos pertenecientes a otros torniquetes
+            if (currentDeviceId && currentDeviceId !== 'all') {
+              if (data.deviceId && String(data.deviceId) !== String(currentDeviceId)) {
+                return; // Omitir eventos pertenecientes a otros torniquetes
+              }
+              if (!data.deviceId && data.deviceName && availableDevices && availableDevices.length > 0) {
+                const currDev = availableDevices.find(d => String(d.id) === String(currentDeviceId));
+                if (currDev && currDev.name && currDev.name.trim().toLowerCase() !== String(data.deviceName).trim().toLowerCase()) {
+                  return;
+                }
+              }
             }
 
             if (data.status === 'verifying') {

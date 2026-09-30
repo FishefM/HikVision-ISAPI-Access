@@ -112,7 +112,8 @@ const authMiddleware = (req, res, next) => {
   if (
     publicRoutes.includes(req.path) ||
     req.path.startsWith('/api/mock-external-api') ||
-    (req.path.startsWith('/api/devices/') && (req.path.endsWith('/events-stream') || req.path.endsWith('/logs-stream'))) ||
+    req.path.includes('/events-stream') ||
+    req.path.includes('/logs-stream') ||
     req.path.startsWith('/css/') ||
     req.path.startsWith('/js/') ||
     req.path.startsWith('/favicon.ico') ||
@@ -120,8 +121,10 @@ const authMiddleware = (req, res, next) => {
       req.path === '/' || 
       req.path === '/event' || 
       req.path === '/api/event' || 
-      req.path.startsWith('/device/') ||
-      req.path.startsWith('/devices/') ||
+      req.path.startsWith('/device') ||
+      req.path.startsWith('/devices') ||
+      req.path.startsWith('/api/device') ||
+      req.path.startsWith('/api/devices') ||
       req.path.startsWith('/ISAPI/') || 
       req.path === '/remoteCheck'
     ))

@@ -1,6 +1,6 @@
 const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
-const { logEvent, broadcastFeedback, broadcastVerifying } = require('../utils/logger');
+const { logEvent, broadcastFeedback, broadcastVerifying, sseClients } = require('../utils/logger');
 
 // Control de concurrencia y rebotes múltiples del lector
 const inFlightRequests = new Map();
@@ -149,11 +149,24 @@ function extractDeviceRequestInfo(req) {
           if (root.QRCode || root.qrCode || root.qrCodeContent) eventType = 'qrCode';
           else if (root.barcode || root.barCode) eventType = 'barcode';
         }
+
+        bodyDevice = root.deviceName || root.DeviceName || 
+                     root.deviceNo || root.DeviceNo || 
+                     root.devIndex || root.DevIndex || 
+                     root.ipAddress || root.devIp || root.netId || root.subDevId;
       }
     }
   }
 
-  // Fallback: Si no se encuentra userId, intenta extraerlo usando expresiones regulares desde el cuerpo sin procesar
+  // Comprobar también en el objeto raíz req.body si no se encontró dentro de root
+  if (!bodyDevice && req.body) {
+    bodyDevice = req.body.deviceName || req.body.DeviceName ||
+                 req.body.deviceNo || req.body.DeviceNo ||
+                 req.body.devIndex || req.body.DevIndex ||
+                 req.body.ipAddress || req.body.devIp;
+  }
+
+  // Fallback: Si no se encuentra userId o bodyDevice, buscar en el cuerpo sin procesar
   if (!isHeartbeat && req.rawBody) {
     // 1. Extraer employeeNoString o employeeNo o userNo
     if (!userId) {
@@ -178,7 +191,7 @@ function extractDeviceRequestInfo(req) {
       }
     }
 
-    // 3. Extraer campos de QR / Código de barras (QRCode, qrCode, barcode, etc.)
+    // 3. Extraer campos de QR / Código de barras
     if (!userId) {
       const qrMatch = req.rawBody.match(/<QRCode[^>]*>([^<]+)<\/QRCode>/i) ||
                       req.rawBody.match(/"QRCode"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
@@ -198,19 +211,42 @@ function extractDeviceRequestInfo(req) {
       }
     }
 
-    // 3. Extraer serialNo
     const serialMatch = req.rawBody.match(/<serialNo[^>]*>([^<]+)<\/serialNo>/i) || 
                         req.rawBody.match(/"serialNo"\s*:\s*["']?([^"',\s}]+)["']?/i);
     if (serialMatch && serialMatch[1]) {
       serialNo = serialMatch[1].trim();
     }
 
-    // 4. Extraer currentVerifyMode
     if (eventType === 'unknown') {
       const modeMatch = req.rawBody.match(/<currentVerifyMode[^>]*>([^<]+)<\/currentVerifyMode>/i) ||
                         req.rawBody.match(/"currentVerifyMode"\s*:\s*["']?([^"',\s}]+)["']?/i);
       if (modeMatch && modeMatch[1]) {
         eventType = modeMatch[1].trim();
+      }
+    }
+
+    // Extraer pistas de torniquete del cuerpo Hikvision (deviceName, deviceNo, ipAddress)
+    if (!bodyDevice) {
+      const devNameMatch = req.rawBody.match(/<deviceName[^>]*>([^<]+)<\/deviceName>/i) ||
+                           req.rawBody.match(/"deviceName"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (devNameMatch && devNameMatch[1]) {
+        bodyDevice = devNameMatch[1].trim();
+      }
+    }
+    if (!bodyDevice) {
+      const devNoMatch = req.rawBody.match(/<deviceNo[^>]*>([^<]+)<\/deviceNo>/i) ||
+                         req.rawBody.match(/"deviceNo"\s*:\s*["']?([^"',\s}]+)["']?/i) ||
+                         req.rawBody.match(/<devIndex[^>]*>([^<]+)<\/devIndex>/i) ||
+                         req.rawBody.match(/"devIndex"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (devNoMatch && devNoMatch[1]) {
+        bodyDevice = devNoMatch[1].trim();
+      }
+    }
+    if (!bodyDevice) {
+      const devIpMatch = req.rawBody.match(/<ipAddress[^>]*>([^<]+)<\/ipAddress>/i) ||
+                         req.rawBody.match(/"ipAddress"\s*:\s*["']?([^"',\s}]+)["']?/i);
+      if (devIpMatch && devIpMatch[1]) {
+        bodyDevice = devIpMatch[1].trim();
       }
     }
   }
@@ -228,61 +264,165 @@ function extractDeviceRequestInfo(req) {
     }
   }
 
-  const deviceId = (req.params && req.params.id) 
-    ? req.params.id 
-    : (req.query && (req.query.deviceId || req.query.device) ? (req.query.deviceId || req.query.device) : null);
+  // Pista de torniquete por parámetros, query, headers o URL
+  let deviceId = (req.params && req.params.id) ? req.params.id : null;
+  if (!deviceId && req.query) {
+    deviceId = req.query.deviceId || req.query.device || req.query.id || null;
+  }
+  if (!deviceId && req.headers) {
+    deviceId = req.headers['x-device-id'] || req.headers['x-device-name'] || req.headers['x-device'] || null;
+  }
+  if (!deviceId && (req.originalUrl || req.url)) {
+    const urlMatch = (req.originalUrl || req.url).match(/\/(?:device|devices)\/([^\/?#]+)/i);
+    if (urlMatch && urlMatch[1] && urlMatch[1] !== 'events-stream' && urlMatch[1] !== 'logs-stream') {
+      deviceId = decodeURIComponent(urlMatch[1]);
+    }
+  }
 
-  return { userId, serialNo, eventType, isHeartbeat, deviceId };
+  return { userId, serialNo, eventType, isHeartbeat, deviceId, bodyDevice };
 }
 
 /**
- * Extrae una dirección IPv4 limpia omitiendo prefijos IPv6
+ * Extrae una dirección IPv4 limpia omitiendo prefijos IPv6 y normalizando octetos
  */
 function cleanIPv4(ip) {
-  if (!ip) return '127.0.0.1';
+  if (!ip) return '';
   let str = String(ip).trim();
+  if (str === '::1' || str === '::') return '127.0.0.1';
   if (str.includes('::ffff:')) {
     str = str.replace('::ffff:', '');
   }
-  return str.split(':')[0].trim();
+  if (str.includes('.') && str.includes(':')) {
+    str = str.split(':')[0].trim();
+  }
+  const parts = str.split('.');
+  if (parts.length === 4 && parts.every(p => /^\d+$/.test(p.trim()))) {
+    return parts.map(p => parseInt(p.trim(), 10)).join('.');
+  }
+  return str;
+}
+
+/**
+ * Coincidencia flexible de nombres de torniquetes (insensible a mayúsculas y espacios)
+ */
+function matchDeviceName(devName, hint) {
+  if (!devName || !hint) return false;
+  const n1 = String(devName).trim().toLowerCase();
+  const n2 = String(hint).trim().toLowerCase();
+  if (n1 === n2) return true;
+  if (n1.replace(/\s+/g, '') === n2.replace(/\s+/g, '')) return true;
+  if (n1.length >= 3 && (n2.includes(n1) || n1.includes(n2))) return true;
+  return false;
+}
+
+/**
+ * Obtiene la dirección IP real del cliente considerando cabeceras de proxy inverso
+ */
+function getClientIp(req) {
+  if (!req) return '127.0.0.1';
+  const forwarded = req.headers && req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const parts = String(forwarded).split(',').map(s => s.trim());
+    if (parts.length > 0 && parts[0]) {
+      return cleanIPv4(parts[0]);
+    }
+  }
+  const realIp = req.headers && req.headers['x-real-ip'];
+  if (realIp) {
+    return cleanIPv4(realIp);
+  }
+  const ip = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress;
+  return cleanIPv4(ip) || '127.0.0.1';
+}
+
+/**
+ * Resuelve de forma exhaustiva qué torniquete/MinMoe realiza la solicitud.
+ * Prioridad:
+ * 1. Pista de ruta/query/header (ID numérico o nombre)
+ * 2. Pista de payload MinMoe (deviceName, deviceNo, ipAddress)
+ * 3. IP de origen del hardware contra el catálogo de devices
+ * 4. Fallback al dispositivo por defecto
+ */
+async function resolveDevice(deviceIdHint, clientIp, bodyDeviceHint = null) {
+  let allDevs = [];
+  try {
+    allDevs = await dbHelper.getDevices();
+  } catch (err) {
+    console.error('[ACCESS] Error consultando dispositivos en DB:', err.message);
+  }
+
+  if (!allDevs || allDevs.length === 0) return null;
+
+  // 1. Pista por URL/Query/Header
+  if (deviceIdHint) {
+    const hint = String(deviceIdHint).trim();
+    const numId = parseInt(hint, 10);
+    if (!isNaN(numId)) {
+      const match = allDevs.find(d => Number(d.id) === numId);
+      if (match) return match;
+    }
+    const nameMatch = allDevs.find(d => matchDeviceName(d.name, hint));
+    if (nameMatch) return nameMatch;
+    const ipMatch = allDevs.find(d => cleanIPv4(d.ip) === cleanIPv4(hint));
+    if (ipMatch) return ipMatch;
+  }
+
+  // 2. Pista en cuerpo de la notificación (deviceName, deviceNo, etc.)
+  if (bodyDeviceHint) {
+    const hint = String(bodyDeviceHint).trim();
+    const numId = parseInt(hint, 10);
+    if (!isNaN(numId)) {
+      const match = allDevs.find(d => Number(d.id) === numId);
+      if (match) return match;
+    }
+    const nameMatch = allDevs.find(d => matchDeviceName(d.name, hint));
+    if (nameMatch) return nameMatch;
+    const ipMatch = allDevs.find(d => cleanIPv4(d.ip) === cleanIPv4(hint));
+    if (ipMatch) return ipMatch;
+  }
+
+  // 3. Pista por dirección IP del lector físico (coincidencia estricta limpia)
+  if (clientIp) {
+    const cleanClient = cleanIPv4(clientIp);
+    if (cleanClient && cleanClient !== '127.0.0.1' && cleanClient !== 'localhost' && cleanClient !== '0.0.0.0') {
+      const match = allDevs.find(d => {
+        const devIp = cleanIPv4(d.ip);
+        return devIp === cleanClient;
+      });
+      if (match) return match;
+    }
+  }
+
+  // 4. Dispositivo predeterminado (fallback)
+  try {
+    const def = await dbHelper.getDefaultDevice();
+    if (def) return def;
+  } catch (_) {}
+
+  return allDevs[0] || null;
 }
 
 /**
  * Ejecuta la llamada a la base de datos, API externa y apertura de puerta
  */
-async function executeAccessValidation(reqInfo, clientIp) {
+async function executeAccessValidation(reqInfo, clientIp, device = null) {
   const { userId, serialNo, eventType } = reqInfo;
 
-  // 1. Identificar el dispositivo MinMoe que origina la solicitud
-  const formattedIp = cleanIPv4(clientIp);
-  let device = null;
-  if (reqInfo.deviceId) {
-    const numId = parseInt(reqInfo.deviceId, 10);
-    if (!isNaN(numId)) {
-      device = await dbHelper.getDeviceById(numId);
-    }
-    if (!device) {
-      const allDevs = await dbHelper.getDevices();
-      device = allDevs.find(d => String(d.name).toLowerCase() === String(reqInfo.deviceId).toLowerCase() || String(d.ip) === String(reqInfo.deviceId));
-    }
-  }
+  // 1. Identificar el dispositivo MinMoe que origina la solicitud si no fue inyectado
   if (!device) {
-    device = await dbHelper.getDeviceByIp(formattedIp);
-  }
-  if (!device) {
-    device = await dbHelper.getDefaultDevice();
+    device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
   }
 
   const deviceId = device ? device.id : null;
   const deviceName = device ? device.name : 'Torniquete';
-  const deviceIp = device ? device.ip : formattedIp;
+  const deviceIp = device ? device.ip : clientIp;
 
   // 2. Checar la base de datos local para el usuario
-  logEvent('info', `[${deviceName}] Consultando base de datos para el usuario ID: ${userId}...`);
+  logEvent('info', `[${deviceName}] Consultando base de datos para el usuario ID: ${userId}...`, deviceId, deviceName);
   const user = await dbHelper.getUserById(userId);
 
   if (!user) {
-    logEvent('warning', `[${deviceName}] Usuario con ID ${userId} no está registrado en la base de datos local.`);
+    logEvent('warning', `[${deviceName}] Usuario con ID ${userId} no está registrado en la base de datos local.`, deviceId, deviceName);
     await dbHelper.addLog(userId, 'No registrado', eventType, 'N/A', { error: 'User not registered' }, false, false, deviceId, deviceName, deviceIp);
     broadcastFeedback(false, 'Desconocido', userId, 'ID de tarjeta no registrado', deviceId, deviceName);
     
@@ -305,7 +445,7 @@ async function executeAccessValidation(reqInfo, clientIp) {
   const isAllowedOnDevice = await dbHelper.isUserAllowedOnDevice(user.user_id, deviceId);
   if (!isAllowedOnDevice) {
     const denyMsg = `No autorizado para ${deviceName}`;
-    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El usuario "${user.name}" (${user.user_id}) no está asignado a este torniquete.`);
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El usuario "${user.name}" (${user.user_id}) no está asignado a este torniquete.`, deviceId, deviceName);
     await dbHelper.addLog(userId, user.name, eventType, user.api_url, { error: denyMsg }, false, false, deviceId, deviceName, deviceIp);
     broadcastFeedback(false, user.name, userId, denyMsg, deviceId, deviceName);
 
@@ -323,14 +463,13 @@ async function executeAccessValidation(reqInfo, clientIp) {
     return { authorized: false, name: user.name, serialNo, reason: denyMsg, deviceId, deviceName };
   }
 
-  logEvent('success', `[${deviceName}] Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`);
+  logEvent('success', `[${deviceName}] Usuario encontrado: "${user.name}". URL de validación: ${user.api_url}`, deviceId, deviceName);
 
-  // Notificar a la pantalla de feedback que la credencial fue leída y el alumno identificado,
-  // indicando que se está esperando la respuesta de la API externa
+  // Notificar a la pantalla de feedback que la credencial fue leída y el alumno identificado
   broadcastVerifying(user.name, user.user_id, eventType, deviceId, deviceName);
 
   // 4. Query para la API externa del usuario
-  logEvent('info', `[${deviceName}] Llamando a la API externa de validación...`);
+  logEvent('info', `[${deviceName}] Llamando a la API externa de validación...`, deviceId, deviceName);
   let authorized = false;
   let apiResponse = null;
 
@@ -340,7 +479,7 @@ async function executeAccessValidation(reqInfo, clientIp) {
     }
     const apiCallResult = await queryExternalApi(user.api_url, user.user_id, user.name, eventType);
     apiResponse = apiCallResult.data;
-    logEvent('info', `API Respuesta (Status ${apiCallResult.status}, ${apiCallResult.duration}ms): ${JSON.stringify(apiResponse)}`);
+    logEvent('info', `[${deviceName}] API Respuesta (Status ${apiCallResult.status}, ${apiCallResult.duration}ms): ${JSON.stringify(apiResponse)}`, deviceId, deviceName);
 
     if (apiCallResult.status === 200 && apiResponse) {
       if (apiResponse.student) {
@@ -364,15 +503,15 @@ async function executeAccessValidation(reqInfo, clientIp) {
       }
     }
   } catch (apiErr) {
-    logEvent('error', `Error al consultar API externa: ${apiErr.message}`);
+    logEvent('error', `[${deviceName}] Error al consultar API externa: ${apiErr.message}`, deviceId, deviceName);
     apiResponse = { error: apiErr.message };
   }
 
   // 5. Log de Veredicto
   if (authorized) {
-    logEvent('success', `[${deviceName}] ACCESO AUTORIZADO para ${user.name} (ID: ${userId})`);
+    logEvent('success', `[${deviceName}] ACCESO AUTORIZADO para ${user.name} (ID: ${userId})`, deviceId, deviceName);
   } else {
-    logEvent('warning', `[${deviceName}] ACCESO DENEGADO para ${user.name} (ID: ${userId})`);
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO para ${user.name} (ID: ${userId})`, deviceId, deviceName);
   }
 
   // 6. Enviar confirmación RemoteCheck al hardware específico Hikvision
@@ -390,7 +529,7 @@ async function executeAccessValidation(reqInfo, clientIp) {
   // 7. Apertura remota de puerta si está autorizado y habilitado en la configuración del torniquete
   let doorOpened = false;
   if (authorized && device && (device.enable_api_open === 1 || device.enable_api_open === true || String(device.enable_api_open) === 'true')) {
-    logEvent('info', `[${deviceName}] Iniciando apertura remota de puerta...`);
+    logEvent('info', `[${deviceName}] Iniciando apertura remota de puerta...`, deviceId, deviceName);
     const openResult = await deviceHelper.openDoor(
       device.ip,
       device.port || 80,
@@ -400,13 +539,13 @@ async function executeAccessValidation(reqInfo, clientIp) {
     );
 
     if (openResult.success) {
-      logEvent('success', `[${deviceName}] Puerta abierta exitosamente por API.`);
+      logEvent('success', `[${deviceName}] Puerta abierta exitosamente por API.`, deviceId, deviceName);
       doorOpened = true;
     } else {
-      logEvent('error', `[${deviceName}] Fallo al abrir la puerta por API: ${openResult.error || 'Respuesta inesperada'}`);
+      logEvent('error', `[${deviceName}] Fallo al abrir la puerta por API: ${openResult.error || 'Respuesta inesperada'}`, deviceId, deviceName);
     }
   } else if (authorized) {
-    logEvent('info', `[${deviceName}] Apertura por API de dispositivo omitida (está desactivada o requiere respuesta HTTP directa).`);
+    logEvent('info', `[${deviceName}] Apertura por API de dispositivo omitida (está desactivada o requiere respuesta HTTP directa).`, deviceId, deviceName);
   }
 
   // 8. Guardar log en SQLite con los datos del torniquete
@@ -442,31 +581,17 @@ async function processAccessRequest(reqInfo, clientIp) {
     return { authorized: false, reason: 'No User ID found', serialNo };
   }
 
-  const formattedIp = cleanIPv4(clientIp);
-  let device = null;
-  if (reqInfo.deviceId) {
-    const numId = parseInt(reqInfo.deviceId, 10);
-    if (!isNaN(numId)) {
-      device = await dbHelper.getDeviceById(numId);
-    }
-    if (!device) {
-      const allDevs = await dbHelper.getDevices();
-      device = allDevs.find(d => String(d.name).toLowerCase() === String(reqInfo.deviceId).toLowerCase() || String(d.ip) === String(reqInfo.deviceId));
-    }
-  }
-  if (!device) {
-    device = await dbHelper.getDeviceByIp(formattedIp);
-  }
-  if (!device) device = await dbHelper.getDefaultDevice();
+  const device = await resolveDevice(reqInfo.deviceId, clientIp, reqInfo.bodyDevice);
+  const deviceId = device ? device.id : null;
   const deviceName = device ? device.name : 'Torniquete';
 
-  logEvent('info', `=== Solicitud de acceso [${deviceName}]: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`);
+  logEvent('info', `=== Solicitud de acceso [${deviceName}]: ID ${userId} (Serial: ${serialNo}, Modo: ${eventType}) ===`, deviceId, deviceName);
 
   const cleanUserId = String(userId).trim();
 
   // 1. Deduplicación concurrente
   if (inFlightRequests.has(cleanUserId)) {
-    logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`);
+    logEvent('info', `[Deduplicación] Solicitud concurrente en proceso para ${cleanUserId} (Serial: ${serialNo}). Reutilizando validación activa...`, deviceId, deviceName);
     try {
       const inFlightResult = await inFlightRequests.get(cleanUserId);
       if (serialNo && serialNo !== inFlightResult.serialNo) {
@@ -489,7 +614,7 @@ async function processAccessRequest(reqInfo, clientIp) {
   if (recentVerifications.has(cleanUserId)) {
     const recent = recentVerifications.get(cleanUserId);
     if (recent.result && recent.result.authorized && (Date.now() - recent.timestamp < 2500)) {
-      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`);
+      logEvent('info', `[Cooldown] Detección repetida para ${cleanUserId} dentro de 2.5s (Serial: ${serialNo}). Manteniendo veredicto: Autorizado`, deviceId, deviceName);
       if (serialNo && device && device.ip && device.username && device.password) {
         deviceHelper.sendRemoteCheck(
           device.ip,
@@ -505,7 +630,7 @@ async function processAccessRequest(reqInfo, clientIp) {
   }
 
   // 3. Ejecutar validación y almacenar promesa en vuelo
-  const validationPromise = executeAccessValidation(reqInfo, clientIp);
+  const validationPromise = executeAccessValidation(reqInfo, clientIp, device);
   inFlightRequests.set(cleanUserId, validationPromise);
 
   try {
@@ -519,13 +644,12 @@ async function processAccessRequest(reqInfo, clientIp) {
   }
 }
 
-
 /**
  * Handle en el dispositivo Hikvision
  */
 const handleDevicePOST = async (req, res) => {
   const reqInfo = extractDeviceRequestInfo(req);
-  const clientIp = req.ip || req.connection.remoteAddress;
+  const clientIp = getClientIp(req);
 
   if (reqInfo.isHeartbeat) {
     const isJsonRequested = req.url.includes('format=json') || 
@@ -632,16 +756,14 @@ async function testScan(req, res) {
   const { userId, eventType, deviceId } = req.body;
   let clientIp = '127.0.0.1';
 
-  if (deviceId) {
-    try {
-      const dev = await dbHelper.getDeviceById(deviceId);
-      if (dev && dev.ip) {
-        clientIp = dev.ip;
-      }
-    } catch (_) {}
+  const dev = await resolveDevice(deviceId, clientIp);
+  if (dev && dev.ip) {
+    clientIp = dev.ip;
   }
   
-  logEvent('info', `Simulando escaneo de usuario para ID: ${userId}${deviceId ? ` en torniquete ID: ${deviceId}` : ''}`);
+  const targetId = dev ? dev.id : (deviceId || null);
+  const targetName = dev ? dev.name : 'Torniquete';
+  logEvent('info', `Simulando escaneo de usuario para ID: ${userId} en torniquete: "${targetName}" (ID ${targetId})`, targetId, targetName);
   
   try {
     const result = await processAccessRequest({
@@ -649,15 +771,86 @@ async function testScan(req, res) {
       serialNo: String(Math.floor(Math.random() * 1000)),
       eventType: eventType || 'simulated_scan',
       isHeartbeat: false,
-      deviceId: deviceId ? Number(deviceId) : null
+      deviceId: targetId
     }, clientIp);
     
     res.json(result);
   } catch (e) {
-    logEvent('error', `Error en simulación: ${e.message}`);
+    logEvent('error', `Error en simulación: ${e.message}`, targetId, targetName);
     res.status(500).json({ error: e.message });
   }
 }
+
+/**
+ * Endpoint SSE para visualización de eventos de un torniquete específico
+ */
+const handleDeviceEventsStream = async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const devIdOrName = req.params.id || req.query.device || req.query.deviceId;
+  let resolvedId = String(devIdOrName || 'all');
+  let resolvedName = null;
+
+  if (devIdOrName && devIdOrName !== 'all') {
+    try {
+      const allDevs = await dbHelper.getDevices();
+      const dev = allDevs.find(d => String(d.id) === String(devIdOrName) || matchDeviceName(d.name, devIdOrName));
+      if (dev) {
+        resolvedId = String(dev.id);
+        resolvedName = dev.name;
+      }
+    } catch (_) {}
+  }
+
+  res.targetDeviceId = resolvedId;
+  res.targetDeviceName = resolvedName;
+  sseClients.push(res);
+
+  const label = resolvedName ? `"${resolvedName}" (ID ${resolvedId})` : (resolvedId !== 'all' ? `ID ${resolvedId}` : 'modo global');
+  logEvent('info', `Pantalla conectada al flujo de eventos dedicado del torniquete ${label}.`, resolvedId, resolvedName);
+
+  req.on('close', () => {
+    const idx = sseClients.indexOf(res);
+    if (idx !== -1) sseClients.splice(idx, 1);
+  });
+};
+
+/**
+ * Endpoint SSE para visualización de logs de un torniquete específico
+ */
+const handleDeviceLogsStream = async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const devIdOrName = req.params.id || req.query.device || req.query.deviceId;
+  let resolvedId = String(devIdOrName || 'all');
+  let resolvedName = null;
+
+  if (devIdOrName && devIdOrName !== 'all') {
+    try {
+      const allDevs = await dbHelper.getDevices();
+      const dev = allDevs.find(d => String(d.id) === String(devIdOrName) || matchDeviceName(d.name, devIdOrName));
+      if (dev) {
+        resolvedId = String(dev.id);
+        resolvedName = dev.name;
+      }
+    } catch (_) {}
+  }
+
+  res.targetDeviceId = resolvedId;
+  res.targetDeviceName = resolvedName;
+  sseClients.push(res);
+
+  req.on('close', () => {
+    const idx = sseClients.indexOf(res);
+    if (idx !== -1) sseClients.splice(idx, 1);
+  });
+};
 
 // Mocks de la API externa para pruebas
 
@@ -691,6 +884,10 @@ function mockExternalApiError(req, res) {
 module.exports = {
   handleDevicePOST,
   testScan,
+  handleDeviceEventsStream,
+  handleDeviceLogsStream,
+  resolveDevice,
+  getClientIp,
   mockExternalApiAllow,
   mockExternalApiDeny,
   mockExternalApiError
