@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userImageFileInput = document.getElementById('user-image-file');
   const userIdPreview = document.getElementById('user-id-preview');
   const userApiUrlInput = document.getElementById('user-api-url');
-  const userDeviceSelect = document.getElementById('user-device-select');
+  const userDevicesCheckboxes = document.getElementById('user-devices-checkboxes');
   const userAssignAllCheckbox = document.getElementById('user-assign-all');
   const btnCancelUser = document.getElementById('btn-cancel-user');
   const filterUserDevice = document.getElementById('filter-user-device');
@@ -421,25 +421,59 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function populateDeviceDropdowns() {
-    // 1. Selector en formulario de registro de usuario (Asignación habitual de 1 dispositivo)
-    if (userDeviceSelect) {
-      const currentSelected = userDeviceSelect.value;
-      userDeviceSelect.innerHTML = '';
-      devicesList.forEach(dev => {
-        const opt = document.createElement('option');
-        opt.value = dev.id;
-        opt.textContent = `${dev.name} (${dev.ip})`;
-        if (dev.is_default) {
-          opt.textContent += ' [Predeterminado]';
-          if (!currentSelected) opt.selected = true;
-        }
-        if (String(currentSelected) === String(dev.id)) {
-          opt.selected = true;
-        }
-        userDeviceSelect.appendChild(opt);
-      });
+  function populateDeviceCheckboxes(selectedIds = null) {
+    if (!userDevicesCheckboxes) return;
+    userDevicesCheckboxes.innerHTML = '';
+
+    if (!devicesList || devicesList.length === 0) {
+      userDevicesCheckboxes.innerHTML = '<span class="text-muted" style="font-size:0.85rem; padding: 0.5rem 0;">No hay torniquetes registrados en el sistema.</span>';
+      return;
     }
+
+    const activeIds = selectedIds !== null ? selectedIds.map(Number) : devicesList.map(d => d.id);
+
+    devicesList.forEach(dev => {
+      const isChecked = activeIds.includes(Number(dev.id));
+      const label = document.createElement('label');
+      label.className = `checkbox-container device-checkbox-card ${isChecked ? 'selected' : ''}`;
+      label.style.fontSize = '0.85rem';
+      label.innerHTML = `
+        <input type="checkbox" name="user_device_checkbox" value="${dev.id}" ${isChecked ? 'checked' : ''}>
+        <span class="checkmark"></span>
+        <div style="margin-left: 0.25rem;">
+          <strong style="color: var(--text-main); font-size: 0.88rem;">${escapeHTML(dev.name)}</strong>
+          ${dev.is_default ? '<span class="badge badge-info" style="font-size:0.65rem; padding: 1px 5px; margin-left: 4px;">Principal</span>' : ''}
+          <div class="text-muted" style="font-size: 0.73rem;">${escapeHTML(dev.ip || 'Sin IP')}</div>
+        </div>
+      `;
+
+      const input = label.querySelector('input');
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          label.classList.add('selected');
+        } else {
+          label.classList.remove('selected');
+        }
+        syncMasterAssignAllCheckbox();
+      });
+
+      userDevicesCheckboxes.appendChild(label);
+    });
+
+    syncMasterAssignAllCheckbox();
+  }
+
+  function syncMasterAssignAllCheckbox() {
+    if (!userAssignAllCheckbox) return;
+    const allCbs = document.querySelectorAll('input[name="user_device_checkbox"]');
+    if (allCbs.length === 0) return;
+    const checkedCbs = document.querySelectorAll('input[name="user_device_checkbox"]:checked');
+    userAssignAllCheckbox.checked = checkedCbs.length === allCbs.length;
+  }
+
+  function populateDeviceDropdowns() {
+    // 1. Checkboxes en formulario de registro de usuario
+    populateDeviceCheckboxes();
 
     // 2. Filtro en tabla de usuarios
     if (filterUserDevice) {
@@ -471,6 +505,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function showDeviceForm(dev = null) {
     if (!deviceFormContainer) return;
     deviceFormContainer.classList.remove('hidden');
+    deviceFormContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    deviceFormContainer.classList.add('form-highlight');
+    setTimeout(() => {
+      deviceFormContainer.classList.remove('form-highlight');
+    }, 2000);
+
     if (dev) {
       deviceFormTitle.textContent = 'Editar Torniquete';
       deviceIdInput.value = dev.id;
@@ -480,7 +520,7 @@ document.addEventListener('DOMContentLoaded', () => {
       deviceDoorInput.value = dev.door_channel || 1;
       deviceUserInput.value = dev.username || 'admin';
       devicePasswordInput.value = '';
-      devicePasswordInput.placeholder = '•••••••• (Dejar en blanco para conservar)';
+      devicePasswordInput.placeholder = '••••••••';
       deviceEnableOpenInput.checked = Boolean(dev.enable_api_open);
       deviceIsDefaultInput.checked = Boolean(dev.is_default);
     } else {
@@ -494,6 +534,13 @@ document.addEventListener('DOMContentLoaded', () => {
       deviceEnableOpenInput.checked = true;
       deviceIsDefaultInput.checked = devicesList.length === 0;
     }
+
+    setTimeout(() => {
+      if (deviceNameInput) {
+        deviceNameInput.focus();
+        deviceNameInput.select();
+      }
+    }, 200);
   }
 
   function hideDeviceForm() {
@@ -585,29 +632,164 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (btnSyncAcuaticApp) {
-    btnSyncAcuaticApp.addEventListener('click', async () => {
-      if (btnSyncAcuaticApp.disabled) return;
-      if (!confirm('¿Desea importar y sincronizar el catálogo de alumnos desde AcuaticApp v2 ahora? Se registrarán automáticamente con acceso escolar permitido.')) return;
+  // Mini menú desplegable de credenciales manuales para AcuaticApp
+  const syncAcuaticMenu = document.getElementById('sync-acuatic-menu');
+  const syncAcuaticForm = document.getElementById('sync-acuatic-form');
+  const btnCloseSyncMenu = document.getElementById('btn-close-sync-menu');
+  const btnCancelSyncMenu = document.getElementById('btn-cancel-sync-menu');
+  const syncAcuaticUserInput = document.getElementById('sync-acuatic-user');
+  const syncAcuaticPasswordInput = document.getElementById('sync-acuatic-password');
+  const btnToggleSyncPwd = document.getElementById('btn-toggle-sync-pwd');
+  const syncAcuaticUrlInput = document.getElementById('sync-acuatic-url');
+  const btnSubmitSync = document.getElementById('btn-submit-sync');
 
-      btnSyncAcuaticApp.disabled = true;
-      const originalHtml = btnSyncAcuaticApp.innerHTML;
-      btnSyncAcuaticApp.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:14px;height:14px;"></i> Sincronizando...`;
+  // Recuperar credenciales previamente guardadas si existen
+  try {
+    const savedUser = localStorage.getItem('acuaticapp_sync_user');
+    if (savedUser && syncAcuaticUserInput) syncAcuaticUserInput.value = savedUser;
+    const savedUrl = localStorage.getItem('acuaticapp_sync_url');
+    if (savedUrl && (savedUrl.startsWith('http://') || savedUrl.startsWith('https://'))) {
+      if (syncAcuaticUrlInput) syncAcuaticUrlInput.value = savedUrl;
+    } else if (savedUrl) {
+      localStorage.removeItem('acuaticapp_sync_url');
+    }
+  } catch (_) {}
+
+  function openSyncMenu() {
+    if (!syncAcuaticMenu) return;
+    syncAcuaticMenu.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+    setTimeout(() => {
+      if (syncAcuaticUserInput && !syncAcuaticUserInput.value) {
+        syncAcuaticUserInput.focus();
+      } else if (syncAcuaticPasswordInput) {
+        syncAcuaticPasswordInput.focus();
+        syncAcuaticPasswordInput.select();
+      }
+    }, 100);
+  }
+
+  function closeSyncMenu() {
+    if (!syncAcuaticMenu) return;
+    syncAcuaticMenu.classList.add('hidden');
+  }
+
+  if (btnSyncAcuaticApp && syncAcuaticMenu) {
+    btnSyncAcuaticApp.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (syncAcuaticMenu.classList.contains('hidden')) {
+        openSyncMenu();
+      } else {
+        closeSyncMenu();
+      }
+    });
+
+    if (btnCloseSyncMenu) {
+      btnCloseSyncMenu.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeSyncMenu();
+      });
+    }
+
+    if (btnCancelSyncMenu) {
+      btnCancelSyncMenu.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeSyncMenu();
+      });
+    }
+
+    // Evitar que clics dentro del menú lo cierren
+    syncAcuaticMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+
+    // Cerrar al hacer clic fuera del menú desplegable
+    document.addEventListener('click', (e) => {
+      if (!syncAcuaticMenu.classList.contains('hidden')) {
+        if (!syncAcuaticMenu.contains(e.target) && e.target !== btnSyncAcuaticApp && !btnSyncAcuaticApp.contains(e.target)) {
+          closeSyncMenu();
+        }
+      }
+    });
+
+    // Cerrar al presionar Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !syncAcuaticMenu.classList.contains('hidden')) {
+        closeSyncMenu();
+      }
+    });
+  }
+
+  // Alternar visibilidad de contraseña en el menú
+  if (btnToggleSyncPwd && syncAcuaticPasswordInput) {
+    btnToggleSyncPwd.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isPass = syncAcuaticPasswordInput.type === 'password';
+      syncAcuaticPasswordInput.type = isPass ? 'text' : 'password';
+      btnToggleSyncPwd.innerHTML = `<i data-lucide="${isPass ? 'eye-off' : 'eye'}" style="width: 14px; height: 14px;"></i>`;
+      if (window.lucide) window.lucide.createIcons();
+    });
+  }
+
+  // Envío del formulario de sincronización con credenciales manuales
+  if (syncAcuaticForm) {
+    syncAcuaticForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const userVal = syncAcuaticUserInput ? syncAcuaticUserInput.value.trim() : '';
+      const passVal = syncAcuaticPasswordInput ? syncAcuaticPasswordInput.value.trim() : '';
+      const urlVal = syncAcuaticUrlInput ? syncAcuaticUrlInput.value.trim() : '';
+
+      if (!userVal) {
+        alert('Por favor ingrese el usuario o escuela de AcuaticApp.');
+        if (syncAcuaticUserInput) syncAcuaticUserInput.focus();
+        return;
+      }
+
+      if (!passVal) {
+        alert('Por favor ingrese la contraseña de acceso de AcuaticApp.');
+        if (syncAcuaticPasswordInput) syncAcuaticPasswordInput.focus();
+        return;
+      }
+
+      const originalSubmitHtml = btnSubmitSync ? btnSubmitSync.innerHTML : '';
+      const originalBtnHtml = btnSyncAcuaticApp ? btnSyncAcuaticApp.innerHTML : '';
+
+      if (btnSubmitSync) {
+        btnSubmitSync.disabled = true;
+        btnSubmitSync.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:13px;height:13px;"></i> Sincronizando...`;
+      }
+      if (btnSyncAcuaticApp) {
+        btnSyncAcuaticApp.disabled = true;
+      }
       if (window.lucide) window.lucide.createIcons();
 
-      appendConsoleLog('info', 'Iniciando sincronización con AcuaticApp v2...');
+      appendConsoleLog('info', `Iniciando sincronización con AcuaticApp (Usuario: "${userVal}")...`);
 
       try {
         const res = await fetch('/api/users/sync-acuaticapp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify({
+            user: userVal,
+            password: passVal,
+            baseUrl: urlVal || 'https://qa.multihivesoft.com'
+          })
         });
 
         const data = await res.json();
         if (res.ok && data.success) {
+          try {
+            localStorage.setItem('acuaticapp_sync_user', userVal);
+            if (urlVal && (urlVal.startsWith('http://') || urlVal.startsWith('https://'))) {
+              localStorage.setItem('acuaticapp_sync_url', urlVal);
+            }
+          } catch (_) {}
+
           appendConsoleLog('success', `[AcuaticApp OK] ${data.message}`);
           alert(`[Sincronización Exitosa]\n${data.message}`);
+          closeSyncMenu();
           refreshUsers();
         } else {
           throw new Error(data.error || 'Fallo en la sincronización');
@@ -616,8 +798,14 @@ document.addEventListener('DOMContentLoaded', () => {
         appendConsoleLog('error', `[AcuaticApp Error] ${err.message}`);
         alert(`Error al sincronizar con AcuaticApp:\n${err.message}`);
       } finally {
-        btnSyncAcuaticApp.disabled = false;
-        btnSyncAcuaticApp.innerHTML = originalHtml;
+        if (btnSubmitSync) {
+          btnSubmitSync.disabled = false;
+          btnSubmitSync.innerHTML = originalSubmitHtml;
+        }
+        if (btnSyncAcuaticApp) {
+          btnSyncAcuaticApp.disabled = false;
+          btnSyncAcuaticApp.innerHTML = originalBtnHtml;
+        }
         if (window.lucide) window.lucide.createIcons();
       }
     });
@@ -627,15 +815,19 @@ document.addEventListener('DOMContentLoaded', () => {
     filterLogDevice.addEventListener('change', () => refreshLogs());
   }
 
-  // Toggle habitual single device select when "Asignar a todos" is checked
-  if (userAssignAllCheckbox && userDeviceSelect) {
+  // Toggle master "Seleccionar todos" checkbox
+  if (userAssignAllCheckbox) {
     userAssignAllCheckbox.addEventListener('change', () => {
-      userDeviceSelect.disabled = userAssignAllCheckbox.checked;
-      if (userAssignAllCheckbox.checked) {
-        userDeviceSelect.style.opacity = '0.5';
-      } else {
-        userDeviceSelect.style.opacity = '1';
-      }
+      const shouldCheck = userAssignAllCheckbox.checked;
+      const allCbs = document.querySelectorAll('input[name="user_device_checkbox"]');
+      allCbs.forEach(cb => {
+        cb.checked = shouldCheck;
+        const card = cb.closest('.device-checkbox-card');
+        if (card) {
+          if (shouldCheck) card.classList.add('selected');
+          else card.classList.remove('selected');
+        }
+      });
     });
   }
 
@@ -962,21 +1154,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userMatriculaInput) userMatriculaInput.value = user.matricula || user.user_id || '';
       if (userPhoneInput) userPhoneInput.value = user.phone || '';
       if (userImageFileInput) userImageFileInput.value = user.image_file || '';
-      if (userApiUrlInput) userApiUrlInput.value = user.api_url || 'http://localhost:3000/api/mock-external-api/allow';
+      if (userApiUrlInput) {
+        userApiUrlInput.value = (user.api_url && user.api_url !== 'http://localhost:3000/api/mock-external-api/allow') ? user.api_url : '';
+      }
 
-      // Asignación de torniquetes
+      // Asignación de torniquetes mediante checkboxes
       const userDevs = user.device_ids || [];
-      const hasAll = devicesList.length > 1 && userDevs.length === devicesList.length;
-      if (userAssignAllCheckbox) {
-        userAssignAllCheckbox.checked = hasAll || userDevs.length === 0;
-      }
-      if (userDeviceSelect) {
-        userDeviceSelect.disabled = userAssignAllCheckbox ? userAssignAllCheckbox.checked : false;
-        userDeviceSelect.style.opacity = (userAssignAllCheckbox && userAssignAllCheckbox.checked) ? '0.5' : '1';
-        if (userDevs.length > 0) {
-          userDeviceSelect.value = userDevs[0];
-        }
-      }
+      populateDeviceCheckboxes(userDevs.length > 0 ? userDevs : null);
 
       updateUserIdPreview();
       setTimeout(() => {
@@ -996,21 +1180,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userMatriculaInput) userMatriculaInput.value = '';
       if (userPhoneInput) userPhoneInput.value = '';
       if (userImageFileInput) userImageFileInput.value = '';
-      if (userApiUrlInput) userApiUrlInput.value = 'http://localhost:3000/api/mock-external-api/allow';
+      if (userApiUrlInput) userApiUrlInput.value = '';
 
-      if (userAssignAllCheckbox) {
-        userAssignAllCheckbox.checked = true;
-      }
-      if (userDeviceSelect) {
-        userDeviceSelect.disabled = true;
-        userDeviceSelect.style.opacity = '0.5';
-        const defaultDev = devicesList.find(d => d.is_default);
-        if (defaultDev) {
-          userDeviceSelect.value = defaultDev.id;
-        } else if (devicesList.length > 0) {
-          userDeviceSelect.value = devicesList[0].id;
-        }
-      }
+      // Asignación de torniquetes por defecto (todos seleccionados)
+      populateDeviceCheckboxes(null);
 
       updateUserIdPreview();
       setTimeout(() => {
@@ -1027,6 +1200,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitBtn = userForm.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.textContent = 'Guardar Alumno';
     if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = '';
+    if (userApiUrlInput) userApiUrlInput.value = '';
     if (userIdPreview) userIdPreview.textContent = '';
   }
 
@@ -1065,8 +1239,20 @@ document.addEventListener('DOMContentLoaded', () => {
       finalUserId = extractIdFromUrl(apiUrlValue);
     }
 
-    const assignAll = userAssignAllCheckbox ? userAssignAllCheckbox.checked : true;
-    const selectedDeviceId = userDeviceSelect ? parseInt(userDeviceSelect.value, 10) : null;
+    const checkedBoxes = document.querySelectorAll('input[name="user_device_checkbox"]:checked');
+    const selectedDeviceIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value, 10)).filter(Boolean);
+
+    if (devicesList.length > 0 && selectedDeviceIds.length === 0) {
+      alert('Debes seleccionar al menos un torniquete permitido para el alumno.');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+      return;
+    }
+
+    const assignAll = devicesList.length > 0 && selectedDeviceIds.length === devicesList.length;
 
     const payload = {
       user_id: finalUserId,
@@ -1080,7 +1266,7 @@ document.addEventListener('DOMContentLoaded', () => {
       acuaticapp_id: acuaticId,
       api_url: apiUrlValue,
       assign_all: assignAll,
-      device_ids: (!assignAll && selectedDeviceId) ? [selectedDeviceId] : []
+      device_ids: selectedDeviceIds
     };
 
     const isEdit = dbId !== '';

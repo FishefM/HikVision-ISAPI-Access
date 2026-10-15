@@ -112,9 +112,59 @@
             <select id="filter-user-device" class="form-input" style="padding: 0.35rem 1.75rem 0.35rem 0.75rem; font-size: 0.8rem; width: auto;" title="Filtrar alumnos por torniquete asignado">
               <option value="">Todos los Torniquetes</option>
             </select>
-            <button id="btn-sync-acuaticapp" class="btn btn-secondary btn-sm" title="Importar y sincronizar catálogo de alumnos desde AcuaticApp v2">
-              <i data-lucide="cloud-download" style="width: 14px; height: 14px; color: var(--accent);"></i> Sincronizar AcuaticApp
-            </button>
+            <div class="sync-acuatic-wrapper">
+              <button id="btn-sync-acuaticapp" type="button" class="btn btn-secondary btn-sm" title="Importar y sincronizar catálogo de alumnos desde AcuaticApp v2">
+                <i data-lucide="cloud-download" style="width: 14px; height: 14px; color: var(--accent);"></i> Sincronizar AcuaticApp
+                <i data-lucide="chevron-down" style="width: 12px; height: 12px; margin-left: 3px; opacity: 0.8;"></i>
+              </button>
+
+              <!-- Mini menú desplegable de credenciales manuales para AcuaticApp -->
+              <div id="sync-acuatic-menu" class="sync-dropdown-menu hidden">
+                <div class="sync-menu-header">
+                  <div style="display: flex; align-items: center; gap: 0.45rem;">
+                    <i data-lucide="key" style="width: 15px; height: 15px; color: var(--accent);"></i>
+                    <span style="font-weight: 600; font-size: 0.85rem; color: var(--text-main);">Credenciales AcuaticApp</span>
+                  </div>
+                  <button type="button" id="btn-close-sync-menu" class="btn-close-mini" title="Cerrar">
+                    <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+                  </button>
+                </div>
+
+                <!-- Aviso de entorno de pruebas -->
+                <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 6px; padding: 0.5rem 0.65rem; margin-top: 0.65rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                  <span class="badge badge-info" style="font-size: 0.62rem; padding: 0.15rem 0.4rem; text-transform: uppercase; font-weight: 700; flex-shrink: 0; margin-top: 1px;">INFO</span>
+                  <div style="font-size: 0.72rem; color: #bae6fd; line-height: 1.35;">
+                    Esta opción solo se realizó en un entorno de pruebas. Para más información contacte con los desarrolladores de AcuaticApp.
+                  </div>
+                </div>
+
+                <form id="sync-acuatic-form" autocomplete="off" style="margin-top: 0.65rem;">
+                  <div class="form-group" style="margin-bottom: 0.65rem;">
+                    <label for="sync-acuatic-user" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Usuario / Escuela</label>
+                    <input type="text" id="sync-acuatic-user" name="acuatic_user" autocomplete="off" class="form-input" placeholder="WONDERPUL_BOSQUES" value="WONDERPUL_BOSQUES" required style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0.65rem;">
+                    <label for="sync-acuatic-password" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Contraseña</label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                      <input type="password" id="sync-acuatic-password" name="acuatic_pwd" autocomplete="new-password" class="form-input" placeholder="Contraseña de acceso" value="W16Ku891" required style="font-size: 0.8rem; padding: 0.45rem 2rem 0.45rem 0.65rem; width: 100%;">
+                      <button type="button" id="btn-toggle-sync-pwd" title="Mostrar/Ocultar contraseña" style="position: absolute; right: 0.5rem; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; display: flex; align-items: center;">
+                        <i data-lucide="eye" style="width: 14px; height: 14px;"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0.85rem;">
+                    <label for="sync-acuatic-url" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">URL Servidor</label>
+                    <input type="url" id="sync-acuatic-url" name="acuatic_url" autocomplete="off" class="form-input" placeholder="https://qa.multihivesoft.com" value="https://qa.multihivesoft.com" style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.25rem;">
+                    <button type="button" id="btn-cancel-sync-menu" class="btn btn-secondary btn-sm" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;">Cancelar</button>
+                    <button type="submit" id="btn-submit-sync" class="btn btn-primary btn-sm" style="font-size: 0.78rem; padding: 0.35rem 0.75rem;">
+                      <i data-lucide="cloud-download" style="width: 13px; height: 13px;"></i> Sincronizar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
             <button id="btn-show-add-user" class="btn btn-success btn-sm">
               <i data-lucide="user-plus"></i> Registrar Alumno
             </button>
@@ -161,30 +211,34 @@
 
               <div class="form-row">
                 <div class="form-group flex-1">
-                  <label for="user-api-url">API URL de Validación (Por defecto: Permitido)</label>
-                  <input type="url" id="user-api-url" class="form-input" value="http://localhost:3000/api/mock-external-api/allow" placeholder="http://localhost:3000/api/mock-external-api/allow">
+                  <label for="user-api-url">API URL de Validación (Opcional - Por defecto: Permitido)</label>
+                  <input type="url" id="user-api-url" class="form-input" placeholder="http://localhost:3000/api/mock-external-api/allow">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.35rem;">
-                    <small class="helper-text">Validación de acceso escolar asignada por defecto.</small>
+                    <small class="helper-text">Si se deja en blanco, se asigna automáticamente la validación permitida por defecto.</small>
                     <span id="user-id-preview" style="font-size: 0.85rem; font-family: monospace; color: var(--accent); font-weight: 600;"></span>
                   </div>
                 </div>
               </div>
 
-              <!-- Torniquete Assignment (Habitual: 1 device; Optional: All devices) -->
-              <div class="form-row align-center" style="background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.25rem;">
-                <div class="form-group flex-1" style="margin-bottom: 0;">
-                  <label for="user-device-select" style="font-weight: 600;">Torniquete Asignado</label>
-                  <select id="user-device-select" class="form-input">
-                    <!-- Populated dynamically -->
-                  </select>
-                </div>
-                <div class="form-group flex-1 checkbox-group" style="padding-top: 1.25rem; margin-bottom: 0;">
-                  <label class="checkbox-container">
+              <!-- Torniquetes Permitidos (Selección múltiple mediante checkboxes) -->
+              <div style="background: rgba(0,0,0,0.2); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; flex-wrap: wrap; gap: 0.5rem;">
+                  <label style="font-weight: 600; font-size: 0.9rem; margin-bottom: 0; display: flex; align-items: center; gap: 0.4rem;">
+                    <i data-lucide="shield-check" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                    Torniquetes Permitidos
+                  </label>
+                  <label class="checkbox-container" style="font-size: 0.8rem; padding-left: 1.6rem; color: var(--accent); margin: 0;">
                     <input type="checkbox" id="user-assign-all" checked>
-                    <span class="checkmark"></span>
-                    Asignar a todos los torniquetes (Recomendado)
+                    <span class="checkmark" style="height: 15px; width: 15px;"></span>
+                    Seleccionar todos
                   </label>
                 </div>
+                <div id="user-devices-checkboxes" class="device-checkboxes-grid">
+                  <!-- Casillas generadas dinámicamente -->
+                </div>
+                <small class="helper-text" style="display: block; margin-top: 0.5rem;">
+                  Marca los torniquetes por los que este alumno tendrá acceso autorizado.
+                </small>
               </div>
 
               <div class="btn-group justify-end" style="display: flex; gap: 0.5rem;">
