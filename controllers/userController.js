@@ -59,13 +59,25 @@ async function getUsers(req, res) {
   try {
     const deviceId = req.query.deviceId || req.query.device_id;
     const search = req.query.search || req.query.q || req.query.busqueda || '';
-    const users = await dbHelper.getUsers(null, deviceId, search);
+    const status = req.query.status || 'active';
+    let users = await dbHelper.getUsers(null, deviceId, search);
     const filter = req.query.filter;
     if (filter === 'test' || filter === 'pruebas') {
-      return res.json(users.filter(u => isTestUser(u)));
+      users = users.filter(u => isTestUser(u));
     } else if (filter === 'production' || filter === 'main' || filter === 'real') {
-      return res.json(users.filter(u => !isTestUser(u)));
+      users = users.filter(u => !isTestUser(u));
     }
+
+    if (status === 'active') {
+      users = users.filter(u => !u.is_archived);
+    } else if (status === 'archived') {
+      users = users.filter(u => Boolean(u.is_archived));
+    }
+    // Si status === 'all', se incluyen tanto activos como archivados
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json(users);
   } catch (e) {
     logEvent('error', `[DB ERROR] Error al consultar lista de alumnos en SQLite: ${e.message}`);
@@ -481,8 +493,7 @@ async function syncAcuaticAppUsers(req, res) {
 async function deleteUser(req, res) {
   const id = req.params.id;
   try {
-    const users = await dbHelper.getUsers();
-    const targetUser = users.find(u => String(u.id) === String(id));
+    const targetUser = (await dbHelper.getUserByPk(id)) || (await dbHelper.getUserById(id));
 
     if (!targetUser) {
       await dbHelper.deleteUser(id);
@@ -520,12 +531,13 @@ async function deleteUser(req, res) {
       }
     }
 
-    // Paso 2: Eliminar de la base de datos local SQLite
+    // Paso 2: Marcar en SQLite como eliminado (is_deleted = 1) para que ya no aparezca en la web
     await dbHelper.deleteUser(id);
-    logEvent('info', `[DB OK] Alumno "${targetUser.name}" (ID registro: ${id}) eliminado de SQLite local.`);
+    logEvent('info', `[DB OK] Alumno "${targetUser.name}" (ID registro: ${id}) marcado como eliminado (oculto en la web, conservado en BD).`);
 
     res.json({
       success: true,
+      message: `Alumno "${targetUser.name}" eliminado de la web y de los torniquetes (conservado en BD).`,
       deviceDeleted: deletedCount > 0,
       deviceSummary: `${deletedCount}/${targetDevices.length} torniquete(s) procesados`,
       diagnostics
@@ -571,6 +583,7 @@ async function syncAllUsers(req, res) {
     if (req.query.includeTests !== 'true') {
       allUsers = allUsers.filter(u => !isTestUser(u));
     }
+    allUsers = allUsers.filter(u => !u.is_archived);
 
     let globalSyncedCount = 0;
     let globalFailedCount = 0;
@@ -732,11 +745,86 @@ async function getUserQR(req, res) {
   }
 }
 
+/**
+ * Archiva o reactiva a un alumno.
+ * Al archivar:
+ *  - Se marca is_archived = 1 en SQLite (sin borrar sus datos ni su historial).
+ *  - Se retira del hardware biométrico MinMoe asignado para evitar aperturas offline.
+ *  - Todo escaneo futuro es rechazado con motivo "Alumno archivado".
+ * Al reactivar:
+ *  - Se marca is_archived = 0 en SQLite.
+ *  - Se re-sincroniza automáticamente a sus torniquetes asignados.
+ */
+async function toggleArchiveUser(req, res) {
+  const id = req.params.id;
+  const isArchived = req.body && req.body.is_archived !== undefined ? Boolean(req.body.is_archived) : true;
+
+  try {
+    const user = (await dbHelper.getUserByPk(id)) || (await dbHelper.getUserById(id));
+    if (!user) {
+      return res.status(404).json({ error: 'Alumno no encontrado en la base de datos.' });
+    }
+
+    await dbHelper.setUserArchived(user.id, isArchived);
+    const actionWord = isArchived ? 'archivado' : 'reactivado';
+
+    // Manejo de sincronización con el hardware MinMoe
+    const allDevices = await dbHelper.getDevices();
+    const userDeviceIds = user.device_ids || [];
+    const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
+
+    let deviceSummary = '';
+    if (isArchived) {
+      let deletedCount = 0;
+      for (const dev of targetDevices) {
+        if (dev.ip && dev.username && dev.password) {
+          const devRes = await deviceHelper.deleteUserFromDevice(
+            dev.ip,
+            dev.port || 80,
+            dev.username,
+            dev.password,
+            user.user_id
+          ).catch(() => ({ success: false }));
+          if (devRes && devRes.success) deletedCount++;
+        }
+      }
+      deviceSummary = `${deletedCount}/${targetDevices.length} torniquete(s) actualizados`;
+      logEvent('info', `[ARCHIVO] Alumno "${user.name}" (${user.user_id}) archivado. Acceso revocado en torniquetes.`);
+    } else {
+      let syncedCount = 0;
+      for (const dev of targetDevices) {
+        if (dev.ip && dev.username && dev.password) {
+          const syncRes = await deviceHelper.syncFullUserToDevice({
+            device_ip: dev.ip,
+            device_port: dev.port || 80,
+            device_user: dev.username,
+            device_password: dev.password
+          }, user).catch(() => ({ synced: false }));
+          if (syncRes && syncRes.synced) syncedCount++;
+        }
+      }
+      deviceSummary = `${syncedCount}/${targetDevices.length} torniquete(s) sincronizados`;
+      logEvent('success', `[REACTIVACIÓN] Alumno "${user.name}" (${user.user_id}) reactivado. Acceso restaurado en torniquetes.`);
+    }
+
+    res.json({
+      success: true,
+      is_archived: isArchived,
+      message: `Alumno "${user.name}" ${actionWord} con éxito.`,
+      deviceSummary
+    });
+  } catch (err) {
+    logEvent('error', `[ARCHIVO ERROR] Error al archivar/reactivar alumno: ${err.message}`);
+    res.status(500).json({ error: `Error en la operación: ${err.message}` });
+  }
+}
+
 module.exports = {
   getUsers,
   addUser,
   updateUser,
   deleteUser,
+  toggleArchiveUser,
   syncAllUsers,
   syncSingleUser,
   syncAcuaticAppUsers,

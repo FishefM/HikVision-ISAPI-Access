@@ -84,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userAssignAllCheckbox = document.getElementById('user-assign-all');
   const btnCancelUser = document.getElementById('btn-cancel-user');
   const filterUserDevice = document.getElementById('filter-user-device');
+  const filterUserStatus = document.getElementById('filter-user-status');
   const usersTableBody = document.querySelector('#users-table tbody');
 
   // Logs Elements
@@ -208,8 +209,12 @@ document.addEventListener('DOMContentLoaded', () => {
   async function refreshUsers(searchQuery = null) {
     try {
       const selectedDevId = filterUserDevice ? filterUserDevice.value : '';
+      const selectedStatus = filterUserStatus ? filterUserStatus.value : 'active';
       const search = searchQuery !== null ? searchQuery : (searchUserInput ? searchUserInput.value.trim() : '');
-      let url = `${API_USERS}?filter=production`;
+      let url = `${API_USERS}?filter=production&_t=${Date.now()}`;
+      if (selectedStatus) {
+        url += `&status=${encodeURIComponent(selectedStatus)}`;
+      }
       if (selectedDevId) {
         url += `&deviceId=${encodeURIComponent(selectedDevId)}`;
       }
@@ -217,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
         url += `&search=${encodeURIComponent(search)}`;
       }
 
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       if (res.status === 401) {
         window.location.href = '/login';
         return;
@@ -611,6 +616,10 @@ document.addEventListener('DOMContentLoaded', () => {
     filterUserDevice.addEventListener('change', () => refreshUsers());
   }
 
+  if (filterUserStatus) {
+    filterUserStatus.addEventListener('change', () => refreshUsers());
+  }
+
   if (searchUserInput) {
     searchUserInput.addEventListener('input', (e) => {
       const val = e.target.value;
@@ -863,11 +872,23 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
 
+      const isArchived = Boolean(user.is_archived);
       const acuaticBadge = user.acuaticapp_id 
         ? `<span class="badge badge-info" style="font-size:0.65rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem;">AcuaticApp</span>` 
         : '';
+      const archivedBadge = isArchived 
+        ? `<span class="badge badge-warning" style="font-size:0.65rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem;" title="Alumno archivado - Acceso inactivo"><i data-lucide="archive" style="width:10px;height:10px;"></i> Archivado</span>` 
+        : '';
+
+      const archiveBtnHtml = isArchived
+        ? `<button class="btn btn-icon-only text-warning archive-user-btn" data-id="${user.id}" title="Reactivar Alumno (Restaurar Acceso)"><i data-lucide="archive-restore"></i></button>`
+        : `<button class="btn btn-icon-only text-muted archive-user-btn" data-id="${user.id}" title="Archivar Alumno (Revocar Acceso sin eliminar)"><i data-lucide="archive"></i></button>`;
 
       const tr = document.createElement('tr');
+      if (isArchived) {
+        tr.style.opacity = '0.78';
+        tr.style.background = 'rgba(245, 158, 11, 0.04)';
+      }
       tr.innerHTML = `
         <td><strong>${escapeHTML(user.matricula || user.user_id)}</strong></td>
         <td style="text-align: center;">${avatarHtml}</td>
@@ -875,6 +896,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div style="display: flex; align-items: center; flex-wrap: wrap;">
             <strong>${escapeHTML(user.name)}</strong>
             ${acuaticBadge}
+            ${archivedBadge}
           </div>
         </td>
         <td><span class="text-muted" style="font-size:0.85rem;">${user.phone ? escapeHTML(user.phone) : '—'}</span></td>
@@ -887,9 +909,11 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="btn btn-icon-only edit-user-btn" data-id="${user.id}" title="Editar Alumno">
               <i data-lucide="edit"></i>
             </button>
-            <button class="btn btn-icon-only text-danger delete-user-btn" data-id="${user.id}" title="Eliminar Alumno">
+            ${archiveBtnHtml}
+            ${isArchived ? `
+            <button class="btn btn-icon-only text-danger delete-user-btn" data-id="${user.id}" title="Eliminar Alumno Definitivamente">
               <i data-lucide="trash-2"></i>
-            </button>
+            </button>` : ''}
           </div>
         </td>
       `;
@@ -898,11 +922,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (window.lucide) window.lucide.createIcons();
 
-    // Attach Event Listeners to actions with robust data-id matching
+    // Attach Event Listeners to actions with strict primary key (id) matching
     document.querySelectorAll('.qr-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = btn.getAttribute('data-id');
-        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+        const user = usersList.find(u => String(u.id) === String(id));
         if (user) showUserQR(user);
       });
     });
@@ -910,7 +934,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.edit-user-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = btn.getAttribute('data-id');
-        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+        const user = usersList.find(u => String(u.id) === String(id));
         if (user) {
           showUserForm(user);
         } else {
@@ -919,27 +943,87 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    // Archivar o Reactivar alumno
+    document.querySelectorAll('.archive-user-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = btn.getAttribute('data-id');
+        const user = usersList.find(u => String(u.id) === String(id));
+        if (!user) return;
+
+        const isCurrentlyArchived = Boolean(user.is_archived);
+        const actionQuestion = isCurrentlyArchived
+          ? `¿Desea reactivar el acceso para "${user.name}"? Se restaurará su permiso en sus torniquetes asignados.`
+          : `¿Desea archivar a "${user.name}"? Se le retirará el acceso a los torniquetes, pero sus datos e historial permanecerán intactos en el sistema.`;
+
+        if (!confirm(actionQuestion)) return;
+
+        btn.disabled = true;
+        const targetState = !isCurrentlyArchived;
+        const trRow = btn.closest('tr');
+        if (trRow) {
+          trRow.style.transition = 'opacity 0.2s ease';
+          trRow.style.opacity = '0.35';
+        }
+        appendConsoleLog('info', `${targetState ? 'Archivando' : 'Reactivando'} a "${user.name}"...`);
+
+        try {
+          const res = await fetch(`${API_USERS}/${id}/archive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_archived: targetState })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            appendConsoleLog('success', data.message);
+            if (data.deviceSummary) {
+              appendConsoleLog('info', `Torniquetes: ${data.deviceSummary}`);
+            }
+            await refreshUsers();
+          } else {
+            if (trRow) trRow.style.opacity = '1';
+            throw new Error(data.error || 'Error al actualizar estado del alumno');
+          }
+        } catch (err) {
+          if (trRow) trRow.style.opacity = '1';
+          appendConsoleLog('error', `Error: ${err.message}`);
+          alert(`Error: ${err.message}`);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
     document.querySelectorAll('.delete-user-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const id = btn.getAttribute('data-id');
-        const user = usersList.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
-        if (user && confirm(`¿Está seguro de eliminar al alumno "${user.name}" de la base de datos local y de sus torniquetes asignados?`)) {
+        const user = usersList.find(u => String(u.id) === String(id));
+        if (user && confirm(`¿Desea eliminar al alumno "${user.name}"? Ya no aparecerá en la web y se revocará su acceso a los torniquetes (sus registros se conservarán en la base de datos).`)) {
+          btn.disabled = true;
+          const trRow = btn.closest('tr');
+          if (trRow) {
+            trRow.style.transition = 'opacity 0.2s ease';
+            trRow.style.opacity = '0.35';
+          }
           appendConsoleLog('info', `Eliminando a "${user.name}" (ID: ${user.user_id})...`);
           try {
             const res = await fetch(`${API_USERS}/${id}`, { method: 'DELETE' });
             const data = await res.json();
             if (res.ok) {
-              appendConsoleLog('success', `Alumno "${user.name}" eliminado de la base de datos local.`);
+              appendConsoleLog('success', data.message || `Alumno "${user.name}" eliminado de la vista web.`);
               if (data.deviceSummary) {
                 appendConsoleLog(data.deviceDeleted ? 'success' : 'warning', `Biométrico MinMoe: ${data.deviceSummary}`);
               }
-              refreshUsers();
+              await refreshUsers();
             } else {
+              if (trRow) trRow.style.opacity = '1';
               throw new Error(data.error || 'Fallo al borrar');
             }
           } catch (err) {
+            if (trRow) trRow.style.opacity = '1';
             appendConsoleLog('error', `Error al eliminar: ${err.message}`);
             alert(`Error: ${err.message}`);
+          } finally {
+            btn.disabled = false;
           }
         }
       });

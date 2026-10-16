@@ -25,6 +25,8 @@ router.get('/users/:id/qr', userController.getUserQR);
 router.post('/users', userController.addUser);
 router.put('/users/:id', userController.updateUser);
 router.delete('/users/:id', userController.deleteUser);
+router.post('/users/:id/archive', userController.toggleArchiveUser);
+router.put('/users/:id/archive', userController.toggleArchiveUser);
 router.post('/users/sync-all', userController.syncAllUsers);
 router.post('/users/:id/sync-device', userController.syncSingleUser);
 router.post('/users/sync-acuaticapp', userController.syncAcuaticAppUsers);

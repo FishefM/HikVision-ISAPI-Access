@@ -41,6 +41,8 @@ function initializeDatabase() {
         if (!colNames.includes('phone')) db.run("ALTER TABLE users ADD COLUMN phone TEXT");
         if (!colNames.includes('image_file')) db.run("ALTER TABLE users ADD COLUMN image_file TEXT");
         if (!colNames.includes('acuaticapp_id')) db.run("ALTER TABLE users ADD COLUMN acuaticapp_id INTEGER");
+        if (!colNames.includes('is_archived')) db.run("ALTER TABLE users ADD COLUMN is_archived INTEGER DEFAULT 0");
+        if (!colNames.includes('is_deleted')) db.run("ALTER TABLE users ADD COLUMN is_deleted INTEGER DEFAULT 0");
       }
     });
 
@@ -384,7 +386,7 @@ const getUsers = (filter, deviceId, search = '') => new Promise((res, rej) => {
     LEFT JOIN user_devices ud ON u.user_id = ud.user_id
     LEFT JOIN devices d ON ud.device_id = d.id
   `;
-  const conditions = [];
+  const conditions = ['(u.is_deleted = 0 OR u.is_deleted IS NULL)'];
   const params = [];
 
   if (deviceId) {
@@ -429,6 +431,8 @@ const getUsers = (filter, deviceId, search = '') => new Promise((res, rej) => {
         phone: r.phone,
         image_file: r.image_file,
         acuaticapp_id: r.acuaticapp_id,
+        is_archived: Boolean(r.is_archived),
+        is_deleted: Boolean(r.is_deleted),
         created_at: r.created_at,
         device_ids,
         device_names
@@ -653,6 +657,14 @@ const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = nu
   });
 });
 
+const setUserArchived = (id, isArchived = true) => new Promise((res, rej) => {
+  const val = isArchived ? 1 : 0;
+  db.run("UPDATE users SET is_archived = ? WHERE id = ?", [val, Number(id)], function(err) {
+    if (err) return rej(err);
+    res(this.changes);
+  });
+});
+
 const deleteUser = (id) => new Promise((res, rej) => {
   db.get("SELECT user_id FROM users WHERE id = ?", [id], (err, row) => {
     if (err) return rej(err);
@@ -661,8 +673,8 @@ const deleteUser = (id) => new Promise((res, rej) => {
       if (userId) {
         db.run("DELETE FROM user_devices WHERE user_id = ?", [userId]);
       }
-      db.run("DELETE FROM users WHERE id = ?", [id], function(delErr) {
-        if (delErr) rej(delErr);
+      db.run("UPDATE users SET is_deleted = 1 WHERE id = ?", [id], function(updErr) {
+        if (updErr) rej(updErr);
         else res(this.changes);
       });
     });
@@ -888,6 +900,7 @@ module.exports = {
   getUserByPk,
   addUser,
   updateUser,
+  setUserArchived,
   deleteUser,
   getLogs,
   getAccessStats,

@@ -112,6 +112,11 @@
             <select id="filter-user-device" class="form-input" style="padding: 0.35rem 1.75rem 0.35rem 0.75rem; font-size: 0.8rem; width: auto;" title="Filtrar alumnos por torniquete asignado">
               <option value="">Todos los Torniquetes</option>
             </select>
+            <select id="filter-user-status" class="form-input" style="padding: 0.35rem 1.75rem 0.35rem 0.75rem; font-size: 0.8rem; width: auto;" title="Filtrar por estado del alumno">
+              <option value="active">Alumnos Activos</option>
+              <option value="archived">Alumnos Archivados</option>
+              <option value="all">Todos los Alumnos</option>
+            </select>
             <div class="sync-acuatic-wrapper">
               <button id="btn-sync-acuaticapp" type="button" class="btn btn-secondary btn-sm" title="Importar y sincronizar catálogo de alumnos desde AcuaticApp v2">
                 <i data-lucide="cloud-download" style="width: 14px; height: 14px; color: var(--accent);"></i> Sincronizar AcuaticApp
@@ -211,8 +216,8 @@
 
               <div class="form-row">
                 <div class="form-group flex-1">
-                  <label for="user-api-url">API URL de Validación (Opcional - Por defecto: Permitido)</label>
-                  <input type="url" id="user-api-url" class="form-input" placeholder="http://localhost:3000/api/mock-external-api/allow">
+                  <label for="user-api-url">API URL de Verificación</label>
+                  <input type="url" id="user-api-url" class="form-input" placeholder="https://multihivesoft.com/api/attendance/scan/cda21c1f...">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.35rem;">
                     <small class="helper-text">Si se deja en blanco, se asigna automáticamente la validación permitida por defecto.</small>
                     <span id="user-id-preview" style="font-size: 0.85rem; font-family: monospace; color: var(--accent); font-weight: 600;"></span>

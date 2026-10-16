@@ -509,7 +509,48 @@ async function executeAccessValidation(reqInfo, clientIp, device = null) {
     return { authorized: false, reason: 'User not registered', serialNo, deviceId, deviceName };
   }
 
-  // 3. Verificar si el usuario está autorizado en ESTE torniquete específico
+  // 3. Verificar si el alumno está dado de baja o archivado
+  if (user.is_deleted) {
+    const denyMsg = 'Alumno dado de baja';
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El alumno "${user.name}" (${user.user_id}) fue dado de baja del sistema.`, deviceId, deviceName);
+    await dbHelper.addLog(userId, user.name, eventType, user.api_url, { error: denyMsg }, false, false, deviceId, deviceName, deviceIp);
+    broadcastFeedback(false, user.name, userId, denyMsg, deviceId, deviceName);
+
+    if (serialNo && device && device.ip && device.username && device.password) {
+      deviceHelper.sendRemoteCheck(
+        device.ip,
+        device.port || 80,
+        device.username,
+        device.password,
+        serialNo,
+        false
+      ).catch(() => {});
+    }
+
+    return { authorized: false, name: user.name, serialNo, reason: denyMsg, deviceId, deviceName };
+  }
+
+  if (user.is_archived) {
+    const denyMsg = 'Alumno archivado - Acceso inactivo';
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El alumno "${user.name}" (${user.user_id}) se encuentra archivado.`, deviceId, deviceName);
+    await dbHelper.addLog(userId, user.name, eventType, user.api_url, { error: denyMsg }, false, false, deviceId, deviceName, deviceIp);
+    broadcastFeedback(false, user.name, userId, denyMsg, deviceId, deviceName);
+
+    if (serialNo && device && device.ip && device.username && device.password) {
+      deviceHelper.sendRemoteCheck(
+        device.ip,
+        device.port || 80,
+        device.username,
+        device.password,
+        serialNo,
+        false
+      ).catch(() => {});
+    }
+
+    return { authorized: false, name: user.name, serialNo, reason: denyMsg, deviceId, deviceName };
+  }
+
+  // 4. Verificar si el usuario está autorizado en ESTE torniquete específico
   const isAllowedOnDevice = await dbHelper.isUserAllowedOnDevice(user.user_id, deviceId);
   if (!isAllowedOnDevice) {
     const denyMsg = `No autorizado para ${deviceName}`;
