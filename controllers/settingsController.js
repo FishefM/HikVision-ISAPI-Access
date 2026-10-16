@@ -58,6 +58,9 @@ async function addDevice(req, res) {
     if (!ip || !String(ip).trim()) {
       return res.status(400).json({ error: 'La dirección IP del MinMoe es obligatoria.' });
     }
+    if (!password || !String(password).trim()) {
+      return res.status(400).json({ error: 'La contraseña ISAPI del dispositivo MinMoe es obligatoria para nuevos registros.' });
+    }
 
     const cleanIp = String(ip).trim();
     const existing = await dbHelper.getDeviceByIp(cleanIp);
@@ -70,11 +73,22 @@ async function addDevice(req, res) {
       ip: cleanIp,
       port: parseInt(port || 80, 10),
       username: String(username || 'admin').trim(),
-      password: String(password || '').trim(),
+      password: String(password).trim(),
       door_channel: parseInt(door_channel || 1, 10),
       enable_api_open: enable_api_open !== false && enable_api_open !== 'false',
       is_default: Boolean(is_default)
     });
+
+    // Sincronizar con la tabla histórica settings si es el único o principal
+    const allDevices = await dbHelper.getDevices().catch(() => []);
+    if (is_default || allDevices.length <= 1) {
+      await dbHelper.updateSettings({
+        device_ip: cleanIp,
+        device_port: parseInt(port || 80, 10),
+        device_username: String(username || 'admin').trim(),
+        device_password: String(password).trim()
+      }).catch(err => console.warn('[Settings] Error sincronizando credenciales a settings:', err.message));
+    }
 
     logEvent('success', `[MinMoe] Nuevo dispositivo registrado: "${name}" (${cleanIp}).`);
     res.json({ success: true, device: newDevice });
@@ -101,6 +115,21 @@ async function updateDevice(req, res) {
     }
 
     await dbHelper.updateDevice(id, data);
+
+    // Sincronizar con la tabla histórica settings si es el dispositivo principal o el único
+    const allDevices = await dbHelper.getDevices().catch(() => []);
+    const isDefaultOrOnly = Boolean(existing.is_default || data.is_default || allDevices.length <= 1);
+    if (isDefaultOrOnly) {
+      const settingsUpdate = {};
+      if (data.ip) settingsUpdate.device_ip = String(data.ip).trim();
+      if (data.port) settingsUpdate.device_port = parseInt(data.port, 10);
+      if (data.username) settingsUpdate.device_username = String(data.username).trim();
+      if (data.password) settingsUpdate.device_password = String(data.password).trim();
+      if (Object.keys(settingsUpdate).length > 0) {
+        await dbHelper.updateSettings(settingsUpdate).catch(err => console.warn('[Settings] Error sincronizando credenciales a settings:', err.message));
+      }
+    }
+
     logEvent('info', `[MinMoe] Dispositivo "${existing.name}" (ID ${id}) actualizado.`);
     res.json({ success: true });
   } catch (e) {
@@ -130,37 +159,59 @@ async function deleteDevice(req, res) {
 }
 
 /**
- * Prueba de conexión ISAPI con un dispositivo específico
+ * Prueba de conexión ISAPI segura con un dispositivo específico o credenciales temporales
+ * (Sin abrir la puerta física accidentalmente)
  */
 async function testDevicePing(req, res) {
   try {
     const deviceId = req.params.id || req.body.deviceId;
-    let device = null;
+    let ip = req.body.ip;
+    let port = req.body.port;
+    let username = req.body.username;
+    let password = req.body.password;
+    let name = req.body.name || 'MinMoe';
+
     if (deviceId) {
-      device = await dbHelper.getDeviceById(deviceId);
-    } else {
-      device = await dbHelper.getDefaultDevice();
+      const dev = await dbHelper.getDeviceById(deviceId);
+      if (dev) {
+        ip = ip || dev.ip;
+        port = port || dev.port;
+        username = username || dev.username;
+        if (!password || password === '••••••••') {
+          password = dev.password;
+        }
+        name = dev.name;
+      }
+    } else if (!ip) {
+      const defaultDev = await dbHelper.getDefaultDevice();
+      if (defaultDev) {
+        ip = defaultDev.ip;
+        port = defaultDev.port;
+        username = defaultDev.username;
+        password = defaultDev.password;
+        name = defaultDev.name;
+      }
     }
 
-    if (!device) {
-      return res.status(404).json({ error: 'Dispositivo no encontrado para prueba de conexión.' });
+    if (!ip) {
+      return res.status(400).json({ error: 'Dirección IP requerida para prueba de conexión.' });
     }
 
-    logEvent('info', `Probando conexión ISAPI con ${device.name} (${device.ip}:${device.port})...`);
+    logEvent('info', `[Ping Test] Probando comunicación ISAPI con "${name}" (${ip}:${port || 80})...`);
     
-    // Probar obtención del estado de la puerta o device info
-    const testResult = await deviceHelper.openDoor(
-      device.ip,
-      device.port,
-      device.username,
-      device.password,
-      device.door_channel || 1
+    const testResult = await deviceHelper.checkDeviceConnection(
+      ip,
+      parseInt(port || 80, 10),
+      username || 'admin',
+      password || ''
     );
 
     res.json({
       success: testResult.success,
-      device: { id: device.id, name: device.name, ip: device.ip },
-      message: testResult.success ? `Conexión exitosa con ${device.name}.` : `Fallo al comunicar con ${device.name}: ${testResult.error || 'Sin respuesta'}`
+      device: { name, ip, port: port || 80 },
+      message: testResult.success 
+        ? `Conexión exitosa con ${name} (${ip}). Dispositivo responde correctamente.` 
+        : `Fallo al comunicar con ${name} (${ip}): ${testResult.error || 'Credenciales no autorizadas o equipo inalcanzable'}`
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

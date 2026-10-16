@@ -37,6 +37,7 @@ router.post('/devices', requireAdmin, settingsController.addDevice);
 router.get('/devices/:id', settingsController.getDevice);
 router.put('/devices/:id', requireAdmin, settingsController.updateDevice);
 router.delete('/devices/:id', requireAdmin, settingsController.deleteDevice);
+router.post('/devices/test-ping', settingsController.testDevicePing);
 router.post('/devices/:id/test-ping', settingsController.testDevicePing);
 router.post('/devices/:id/open-door', settingsController.openDoor);
 

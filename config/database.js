@@ -532,7 +532,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
       if (err) return rej(err);
 
       if (existing) {
-        // Actualizar usuario existente sin duplicar
+        // Actualizar usuario existente sin duplicar y reactivar si estaba eliminado o archivado
         try {
           await updateUser(existing.id, {
             user_id: userId || existing.user_id,
@@ -545,6 +545,8 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             phone: phone || undefined,
             image_file: imageFile || undefined,
             acuaticapp_id: acuaticappId || undefined,
+            is_deleted: userData.is_deleted !== undefined ? (userData.is_deleted ? 1 : 0) : 0,
+            is_archived: userData.is_archived !== undefined ? (userData.is_archived ? 1 : 0) : 0,
             device_ids: targetDeviceIds
           });
           return res({
@@ -605,6 +607,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
 
 const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => new Promise((res, rej) => {
   let userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, targetDeviceIds;
+  let isArchived, isDeleted;
 
   if (typeof userData === 'object' && userData !== null) {
     userId = userData.user_id;
@@ -617,6 +620,8 @@ const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = nu
     phone = userData.phone;
     imageFile = userData.image_file;
     acuaticappId = userData.acuaticapp_id;
+    isArchived = userData.is_archived;
+    isDeleted = userData.is_deleted;
     targetDeviceIds = userData.device_ids !== undefined ? userData.device_ids : legacyName;
   } else {
     userId = userData;
@@ -642,18 +647,33 @@ const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = nu
   if (phone !== undefined) { fields.push("phone = ?"); values.push(phone); }
   if (imageFile !== undefined) { fields.push("image_file = ?"); values.push(imageFile); }
   if (acuaticappId !== undefined) { fields.push("acuaticapp_id = ?"); values.push(acuaticappId); }
+  if (isArchived !== undefined) { fields.push("is_archived = ?"); values.push(isArchived ? 1 : 0); }
+  if (isDeleted !== undefined) { fields.push("is_deleted = ?"); values.push(isDeleted ? 1 : 0); }
 
   if (fields.length === 0) return res(0);
 
-  values.push(id);
-  const query = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+  // Obtener el user_id anterior para migrar o limpiar user_devices en caso de cambio de matrícula
+  db.get("SELECT user_id FROM users WHERE id = ?", [Number(id)], (getErr, row) => {
+    if (getErr) return rej(getErr);
+    const oldUserId = row ? row.user_id : null;
+    const finalUserId = userId || oldUserId;
 
-  db.run(query, values, async function(err) {
-    if (err) return rej(err);
-    if (targetDeviceIds !== undefined && targetDeviceIds !== null && userId) {
-      await setUserDevices(userId, targetDeviceIds).catch(() => {});
-    }
-    res(this.changes);
+    values.push(id);
+    const query = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+
+    db.run(query, values, async function(err) {
+      if (err) return rej(err);
+
+      // Si cambió el user_id, limpiar registros huérfanos con el user_id anterior
+      if (oldUserId && finalUserId && String(oldUserId).trim() !== String(finalUserId).trim()) {
+        await new Promise(r => db.run("DELETE FROM user_devices WHERE user_id = ?", [String(oldUserId).trim()], r)).catch(() => {});
+      }
+
+      if (targetDeviceIds !== undefined && targetDeviceIds !== null && finalUserId) {
+        await setUserDevices(finalUserId, targetDeviceIds).catch(() => {});
+      }
+      res(this.changes);
+    });
   });
 });
 

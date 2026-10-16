@@ -2,17 +2,26 @@ const db = require('../config/database');
 const device = require('../utils/device');
 
 async function syncAll() {
-  const settings = await db.getSettings();
+  const defaultDev = await db.getDefaultDevice().catch(() => null);
+  const settings = await db.getSettings().catch(() => ({}));
+  
+  const deviceConfig = {
+    device_ip: (defaultDev && defaultDev.ip) || settings.device_ip,
+    device_port: (defaultDev && defaultDev.port) || settings.device_port || 80,
+    device_user: (defaultDev && defaultDev.username) || settings.device_username || settings.device_user || 'admin',
+    device_password: (defaultDev && defaultDev.password) || settings.device_password
+  };
+
   const users = await db.getUsers();
 
   console.log(`\n======================================================`);
   console.log(`  SINCRONIZANDO USUARIOS Y TARJETAS AL MÓDULO HIKVISION`);
-  console.log(`  Dispositivo IP: ${settings.device_ip}:${settings.device_port}`);
+  console.log(`  Dispositivo: ${defaultDev ? defaultDev.name : 'MinMoe'} (${deviceConfig.device_ip}:${deviceConfig.device_port})`);
   console.log(`  Total alumnos en base de datos: ${users.length}`);
   console.log(`======================================================\n`);
 
-  if (!settings.device_ip || !settings.device_user || !settings.device_password) {
-    console.error('[ERROR] Configuración de dispositivo incompleta en SQLite (IP, Usuario o Contraseña).');
+  if (!deviceConfig.device_ip || !deviceConfig.device_user || !deviceConfig.device_password) {
+    console.error('[ERROR] Configuración de dispositivo incompleta (IP, Usuario o Contraseña).');
     process.exit(1);
   }
 

@@ -324,6 +324,21 @@ async function updateUser(req, res) {
   
   let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
   if (targetDevices.length > 0) {
+    // Si la matrícula o user_id cambió, remover el ID anterior del hardware MinMoe para no dejar huérfanos
+    if (existing && existing.user_id && String(existing.user_id).trim() !== String(user_id).trim()) {
+      logEvent('info', `[MinMoe] Matrícula modificada de "${existing.user_id}" a "${user_id}". Removiendo registro antiguo en torniquetes...`);
+      allDevices.forEach(dev => {
+        if (dev.ip && dev.username && dev.password) {
+          deviceHelper.deleteUserFromDevice({
+            device_ip: dev.ip,
+            device_port: dev.port || 80,
+            device_user: dev.username,
+            device_password: dev.password
+          }, existing.user_id).catch(() => {});
+        }
+      });
+    }
+
     const syncPromises = targetDevices.map(async (dev) => {
       if (dev.ip && dev.username && dev.password) {
         logEvent('info', `[MinMoe - ${dev.name}] Actualizando datos de "${name}" (${user_id}) en ${dev.ip}...`);

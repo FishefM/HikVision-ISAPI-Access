@@ -44,9 +44,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const deviceDoorInput = document.getElementById('device-door');
   const deviceUserInput = document.getElementById('device-user');
   const devicePasswordInput = document.getElementById('device-password');
+  const devicePasswordRequiredStar = document.getElementById('device-password-required-star');
+  const devicePasswordHint = document.getElementById('device-password-hint');
   const deviceEnableOpenInput = document.getElementById('device-enable-api-open');
   const deviceIsDefaultInput = document.getElementById('device-is-default');
   const btnCancelDevice = document.getElementById('btn-cancel-device');
+  const btnTestDeviceForm = document.getElementById('btn-test-device-form');
 
   // Receptionists Elements
   const btnShowAddReceptionist = document.getElementById('btn-show-add-receptionist');
@@ -526,6 +529,8 @@ document.addEventListener('DOMContentLoaded', () => {
       deviceUserInput.value = dev.username || 'admin';
       devicePasswordInput.value = '';
       devicePasswordInput.placeholder = '••••••••';
+      if (devicePasswordRequiredStar) devicePasswordRequiredStar.style.display = 'none';
+      if (devicePasswordHint) devicePasswordHint.style.display = 'block';
       deviceEnableOpenInput.checked = Boolean(dev.enable_api_open);
       deviceIsDefaultInput.checked = Boolean(dev.is_default);
     } else {
@@ -536,6 +541,8 @@ document.addEventListener('DOMContentLoaded', () => {
       deviceDoorInput.value = '1';
       deviceUserInput.value = 'admin';
       devicePasswordInput.placeholder = '••••••••';
+      if (devicePasswordRequiredStar) devicePasswordRequiredStar.style.display = 'inline';
+      if (devicePasswordHint) devicePasswordHint.style.display = 'none';
       deviceEnableOpenInput.checked = true;
       deviceIsDefaultInput.checked = devicesList.length === 0;
     }
@@ -553,16 +560,87 @@ document.addEventListener('DOMContentLoaded', () => {
     deviceFormContainer.classList.add('hidden');
     deviceForm.reset();
     deviceIdInput.value = '';
+    if (devicePasswordRequiredStar) devicePasswordRequiredStar.style.display = 'inline';
+    if (devicePasswordHint) devicePasswordHint.style.display = 'none';
   }
 
   if (btnShowAddDevice) btnShowAddDevice.addEventListener('click', () => showDeviceForm());
   if (btnCancelDevice) btnCancelDevice.addEventListener('click', () => hideDeviceForm());
+
+  if (btnTestDeviceForm) {
+    btnTestDeviceForm.addEventListener('click', async () => {
+      const ip = deviceIpInput.value.trim();
+      if (!ip) {
+        alert('Por favor introduce la dirección IP del torniquete para probar la conexión.');
+        deviceIpInput.focus();
+        return;
+      }
+
+      const devId = deviceIdInput.value;
+      const isEdit = Boolean(devId);
+      const password = devicePasswordInput.value.trim();
+
+      if (!isEdit && !password) {
+        alert('Por favor introduce la contraseña ISAPI para probar la conexión.');
+        devicePasswordInput.focus();
+        return;
+      }
+
+      const port = parseInt(devicePortInput.value || 80, 10);
+      const username = deviceUserInput.value.trim() || 'admin';
+      const name = deviceNameInput.value.trim() || 'Torniquete';
+
+      btnTestDeviceForm.disabled = true;
+      const originalHtml = btnTestDeviceForm.innerHTML;
+      btnTestDeviceForm.innerHTML = '<i data-lucide="loader" class="spin"></i> Probando...';
+      if (window.lucide) window.lucide.createIcons();
+
+      appendConsoleLog('info', `[Ping Test] Probando comunicación ISAPI con "${name}" (${ip}:${port})...`);
+
+      try {
+        const res = await fetch('/api/devices/test-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deviceId: devId || undefined,
+            ip,
+            port,
+            username,
+            password: password || undefined,
+            name
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          appendConsoleLog('success', `[Ping OK] ${data.message}`);
+          alert(`✅ Conexión exitosa:\n${data.message}`);
+        } else {
+          appendConsoleLog('warning', `[Ping Fallo] ${data.error || data.message || 'Sin respuesta'}`);
+          alert(`❌ Fallo de conexión:\n${data.error || data.message}`);
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[Ping Error] Excepción: ${err.message}`);
+        alert(`❌ Error al probar conexión:\n${err.message}`);
+      } finally {
+        btnTestDeviceForm.disabled = false;
+        btnTestDeviceForm.innerHTML = originalHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
 
   if (deviceForm) {
     deviceForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const devId = deviceIdInput.value;
       const isEdit = Boolean(devId);
+
+      if (!isEdit && !devicePasswordInput.value.trim()) {
+        alert('La contraseña ISAPI del dispositivo MinMoe es obligatoria para nuevos registros.');
+        devicePasswordInput.focus();
+        return;
+      }
 
       const payload = {
         name: deviceNameInput.value.trim(),

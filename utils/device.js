@@ -159,6 +159,31 @@ async function openDoor(deviceIp, devicePort, username, password, doorChannel = 
     };
   }
 }
+
+/**
+ * Safely tests connectivity and authentication with a Hikvision device
+ * without opening the door or actuating physical relays.
+ */
+async function checkDeviceConnection(deviceIp, devicePort, username, password) {
+  try {
+    const result = await sendISAPICommand(deviceIp, devicePort, username, password, 'GET', '/ISAPI/System/deviceInfo');
+    const isSuccess = result.status === 200 && (
+      (typeof result.data === 'string' && (result.data.includes('DeviceInfo') || result.data.includes('deviceInfo') || result.data.includes('deviceName'))) ||
+      (typeof result.data === 'object' && result.data !== null)
+    );
+    return {
+      success: isSuccess,
+      status: result.status,
+      data: result.data
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 /**
  * Checks if the ISAPI response indicates success (works with both XML and JSON).
  */
@@ -739,6 +764,7 @@ async function sendRemoteCheck(deviceIp, devicePort, username, password, serialN
 module.exports = {
   sendISAPICommand,
   openDoor,
+  checkDeviceConnection,
   sendISAPIGenericRequest,
   syncUserInfo,
   syncCardInfo,
