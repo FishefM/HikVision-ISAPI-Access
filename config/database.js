@@ -12,6 +12,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 function initializeDatabase() {
+  // Asegurar que la carpeta logs/archives exista dentro del proyecto
+  try {
+    const archiveDir = path.join(__dirname, '..', 'logs', 'archives');
+    if (!fs.existsSync(archiveDir)) {
+      fs.mkdirSync(archiveDir, { recursive: true });
+    }
+  } catch (err) {
+    console.error('[DB] Advertencia al verificar/crear logs/archives:', err.message);
+  }
+
   db.serialize(() => {
     // 1. Tabla de Usuarios
     db.run(`
