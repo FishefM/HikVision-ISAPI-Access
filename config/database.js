@@ -1,5 +1,6 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 const dbPath = path.join(__dirname, '..', 'database.sqlite');
 
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -775,27 +776,132 @@ const clearLogs = (deviceId = null) => new Promise((res, rej) => {
   db.run(query, params, (err) => err ? rej(err) : res(true));
 });
 
+function escapeCSV(val) {
+  if (val === null || val === undefined) return '""';
+  const str = String(val).replace(/"/g, '""');
+  return `"${str}"`;
+}
+
 /**
- * Purga registros de accesos más antiguos de N días
+ * Respalda registros de acceso antiguos en archivos mensuales CSV y luego los purga de SQLite.
+ * Si falla la escritura en disco, aborta la operación sin borrar nada de la base de datos.
  */
 const cleanOldLogs = (days) => new Promise((res, rej) => {
   const retentionDays = parseInt(days || process.env.LOG_RETENTION_DAYS || 30, 10);
-  db.run(
-    "DELETE FROM access_logs WHERE timestamp < datetime('now', '-' || ? || ' days')",
-    [retentionDays],
-    function(err) {
-      if (err) {
-        console.error('[DB ERROR] Error al purgar logs antiguos:', err.message);
-        rej(err);
-      } else {
-        if (this.changes > 0) {
-          console.log(`[DB] Mantenimiento automático: ${this.changes} registros antiguos (> ${retentionDays} días) purgados.`);
-        }
-        res(this.changes);
-      }
+  const cutoffQuery = "SELECT * FROM access_logs WHERE timestamp < datetime('now', '-' || ? || ' days') ORDER BY timestamp ASC";
+
+  db.all(cutoffQuery, [retentionDays], (fetchErr, oldRows) => {
+    if (fetchErr) {
+      console.error('[DB ERROR] Error al consultar logs para archivado:', fetchErr.message);
+      return rej(fetchErr);
     }
-  );
+
+    if (!oldRows || oldRows.length === 0) {
+      return res(0);
+    }
+
+    try {
+      const archiveDir = path.join(__dirname, '..', 'logs', 'archives');
+      if (!fs.existsSync(archiveDir)) {
+        fs.mkdirSync(archiveDir, { recursive: true });
+      }
+
+      // Agrupar filas por mes (YYYY-MM)
+      const rowsByMonth = {};
+      oldRows.forEach(row => {
+        let monthKey = 'general';
+        if (row.timestamp) {
+          const match = String(row.timestamp).match(/^(\d{4}-\d{2})/);
+          if (match) monthKey = match[1];
+        }
+        if (!rowsByMonth[monthKey]) rowsByMonth[monthKey] = [];
+        rowsByMonth[monthKey].push(row);
+      });
+
+      // Guardar cada mes en su archivo CSV
+      for (const [month, rows] of Object.entries(rowsByMonth)) {
+        const filePath = path.join(archiveDir, `accesos-${month}.csv`);
+        const fileExists = fs.existsSync(filePath);
+        let content = '';
+
+        if (!fileExists) {
+          // BOM UTF-8 para apertura directa en Excel con acentos y caracteres especiales
+          content += '\uFEFF"ID","Fecha y Hora","ID Alumno","Nombre Alumno","Torniquete","IP Torniquete","Tipo Evento","Autorizado","Puerta Abierta","URL Validacion","Respuesta API"\r\n';
+        }
+
+        rows.forEach(r => {
+          const rowLine = [
+            escapeCSV(r.id),
+            escapeCSV(r.timestamp),
+            escapeCSV(r.user_id),
+            escapeCSV(r.name),
+            escapeCSV(r.device_name || (r.device_id ? `Torniquete ${r.device_id}` : 'General')),
+            escapeCSV(r.device_ip),
+            escapeCSV(r.event_type),
+            r.authorized ? '"SI"' : '"NO"',
+            r.door_opened ? '"SI"' : '"NO"',
+            escapeCSV(r.api_url),
+            escapeCSV(r.api_response)
+          ].join(',') + '\r\n';
+          content += rowLine;
+        });
+
+        fs.appendFileSync(filePath, content, 'utf8');
+        console.log(`[DB Archivo] ${rows.length} registros respaldados en logs/archives/accesos-${month}.csv`);
+      }
+
+      // Una vez asegurados en disco, purgar de SQLite
+      db.run(
+        "DELETE FROM access_logs WHERE timestamp < datetime('now', '-' || ? || ' days')",
+        [retentionDays],
+        function(delErr) {
+          if (delErr) {
+            console.error('[DB ERROR] Error al purgar logs archivados de SQLite:', delErr.message);
+            rej(delErr);
+          } else {
+            console.log(`[DB] Mantenimiento completado: ${this.changes} registros archivados mensualmente en CSV y purgados de SQLite.`);
+            res(this.changes);
+          }
+        }
+      );
+    } catch (fsErr) {
+      console.error('[DB ERROR] Error al escribir archivos de archivo mensual (operación abortada por seguridad):', fsErr.message);
+      rej(fsErr);
+    }
+  });
 });
+
+/**
+ * Retorna la lista de archivos de logs mensuales disponibles en disco
+ */
+const getLogArchives = () => {
+  const archiveDir = path.join(__dirname, '..', 'logs', 'archives');
+  if (!fs.existsSync(archiveDir)) return [];
+  const files = fs.readdirSync(archiveDir).filter(f => f.endsWith('.csv'));
+  return files.map(file => {
+    const stats = fs.statSync(path.join(archiveDir, file));
+    return {
+      filename: file,
+      sizeBytes: stats.size,
+      sizeFormatted: stats.size >= 1048576 
+        ? `${(stats.size / 1048576).toFixed(2)} MB` 
+        : `${(stats.size / 1024).toFixed(1)} KB`,
+      updatedAt: stats.mtime
+    };
+  }).sort((a, b) => b.filename.localeCompare(a.filename));
+};
+
+/**
+ * Obtiene la ruta física segura de un archivo CSV de logs mensual para descarga
+ */
+const getLogArchiveFilePath = (filename) => {
+  if (!filename) return null;
+  const cleanName = path.basename(filename);
+  const archiveDir = path.join(__dirname, '..', 'logs', 'archives');
+  const targetPath = path.join(archiveDir, cleanName);
+  if (fs.existsSync(targetPath)) return targetPath;
+  return null;
+};
 
 // Programar mantenimiento diario automático de logs
 setInterval(() => {
@@ -927,6 +1033,8 @@ module.exports = {
   addLog,
   clearLogs,
   cleanOldLogs,
+  getLogArchives,
+  getLogArchiveFilePath,
   getSettings,
   updateSettings,
   getReceptionists,

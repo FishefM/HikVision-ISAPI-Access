@@ -49,6 +49,9 @@ router.post('/settings', requireAdmin, settingsController.updateSettings);
 router.get('/logs', settingsController.getLogs);
 router.get('/stats', settingsController.getAccessStats);
 router.post('/logs/clear', requireAdmin, settingsController.clearLogs);
+router.get('/logs/archives', requireAdmin, settingsController.getLogArchives);
+router.get('/logs/archives/:filename', requireAdmin, settingsController.downloadLogArchive);
+router.post('/logs/archive-now', requireAdmin, settingsController.triggerLogArchive);
 
 // Door control routes
 router.post('/test-open-door', settingsController.openDoor);

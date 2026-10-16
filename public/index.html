@@ -460,6 +460,9 @@
             <select id="filter-log-device" class="form-input" style="padding: 0.35rem 1.75rem 0.35rem 0.75rem; font-size: 0.8rem; width: auto;" title="Filtrar registros por torniquete">
               <option value="">Todos los Torniquetes</option>
             </select>
+            <button id="btn-show-archives" class="btn btn-secondary btn-sm admin-only" title="Archivos Mensuales CSV">
+              <i data-lucide="archive"></i> Archivos Mensuales
+            </button>
             <button id="btn-clear-db-logs" class="btn btn-icon-only text-danger admin-only" title="Limpiar Historial">
               <i data-lucide="trash-2"></i>
             </button>
@@ -511,6 +514,52 @@
         </div>
       </div>
     </section>
+
+  <!-- Monthly Log Archives Modal -->
+  <div id="archives-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 520px; padding: 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="archive" style="color: var(--primary);"></i>
+          <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Archivos Mensuales de Accesos</h3>
+        </div>
+        <button id="btn-close-archives-icon" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center;" title="Cerrar">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+        </button>
+      </div>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.4;">
+        Los registros con más de 30 días de antigüedad se resguardan fuera de la base de datos en archivos CSV mensuales (compatibles con Excel). Esto mantiene la base de datos rápida y ligera sin perder el historial.
+      </p>
+      
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 0.5rem;">
+        <span style="font-size: 0.85rem; font-weight: 600;">Archivos Disponibles</span>
+        <button id="btn-archive-now" class="btn btn-secondary btn-sm" title="Archivar registros anteriores a 30 días ahora mismo">
+          <i data-lucide="hard-drive-download"></i> Archivar Ahora
+        </button>
+      </div>
+
+      <div class="table-container" style="max-height: 240px; margin-bottom: 1rem; border: 1px solid var(--border-color); border-radius: 8px;">
+        <table class="data-table" id="archives-table" style="font-size: 0.82rem;">
+          <thead>
+            <tr>
+              <th>Mes / Archivo</th>
+              <th style="width: 25%;">Tamaño</th>
+              <th style="width: 20%; text-align: right;">Descarga</th>
+            </tr>
+          </thead>
+          <tbody id="archives-list-body">
+            <tr>
+              <td colspan="3" class="text-center">Cargando archivos...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="btn-group justify-end">
+        <button type="button" id="btn-close-archives-btn" class="btn btn-secondary btn-sm">Cerrar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- QR Code Modal -->
   <div id="qr-modal" class="modal-overlay hidden">

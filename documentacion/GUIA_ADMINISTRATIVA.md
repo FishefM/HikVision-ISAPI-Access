@@ -114,7 +114,7 @@ Desde la tabla central de **Alumnos Registrados**, el personal puede gestionar e
 #### 1. Alta y Edición de Alumnos:
 * Ingrese el Nombre Completo (o Nombres y Apellidos por separado), Matrícula y Teléfono.
 * **Asignación de Torniquetes:** Marque las casillas de los torniquetes por los cuales el alumno tiene permitido el paso (o marque *Asignar a todos los torniquetes*).
-* **Campo API URL Relacionada (Opcional):**
+* **Campo API URL Relacionada:**
   * Si cuenta con una URL de validación externa (ej. enlace de asistencia escolar o AcuaticApp), péguela en el campo correspondiente.
   * Si se deja en blanco, el sistema le asignará automáticamente validación interna garantizada (`allow`), otorgando acceso permanente.
 
@@ -127,8 +127,8 @@ Para mantener la integridad de los registros de asistencia sin borrar historiale
   * Al presionar el botón rojo **Eliminar** (`🗑️`), el sistema retira al alumno del hardware MinMoe y lo oculta de la interfaz web, pero **preserva sus registros históricos de auditoría** en la base de datos.
 * **Filtros en Tabla:** Puede filtrar la lista entre *"Alumnos Activos"*, *"Archivados"* o *"Todos"*, así como filtrar por torniquete asignado.
 
-#### 3. Búsqueda Rápida en Tiempo Real:
-Escriba en la barra de búsqueda para filtrar instantáneamente por Nombre, Matrícula, Teléfono o ID de AcuaticApp.
+!!! Info 3. Búsqueda Rápida en Tiempo Real:
+    Escriba en la barra de búsqueda para filtrar instantáneamente por Nombre, Matrícula, Teléfono o ID de AcuaticApp.
 
 ---
 
@@ -139,6 +139,9 @@ Si la institución utiliza **AcuaticApp**:
 2. Si es necesario, verifique sus credenciales de escuela (usuario y contraseña de la plataforma AcuaticApp).
 3. Presione **"Iniciar Sincronización"**. El sistema se conectará a la API institucional, descargará todos los alumnos activos paginados y los dará de alta en SQLite y en los torniquetes.
 4. **Reactivación Automática:** Si un alumno fue previamente eliminado o archivado en el sistema local pero continúa activo en AcuaticApp, la sincronización lo reactivará automáticamente con acceso autorizado.
+
+!!! Warning Aviso
+    Esta opción fué implementada con una API de prueba brindada por AcuaticApp.
 
 ---
 
@@ -198,7 +201,7 @@ En caso de requerir la apertura inmediata de un torniquete:
 
 ### C. Cambio de Contraseña Administrativa
 
-!!! warning Seguridad del Sistema
+!!! danger Seguridad del Sistema
     El sistema se entrega configurado con la contraseña de administrador predeterminada **`admin123`**. Se recomienda enfáticamente reemplazarla por una clave institucional segura para evitar accesos no autorizados a la configuración y al padrón de alumnos.
 
 **Procedimiento para cambiar la contraseña:**

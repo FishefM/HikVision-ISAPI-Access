@@ -349,6 +349,48 @@ async function getAccessStats(req, res) {
   }
 }
 
+/**
+ * Retorna la lista de archivos mensuales de logs generados en disco
+ */
+async function getLogArchives(req, res) {
+  try {
+    const archives = dbHelper.getLogArchives();
+    res.json(archives);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+/**
+ * Descarga un archivo CSV de logs mensual específico
+ */
+async function downloadLogArchive(req, res) {
+  try {
+    const filename = req.params.filename;
+    const filePath = dbHelper.getLogArchiveFilePath(filename);
+    if (!filePath) {
+      return res.status(404).json({ error: 'Archivo de log no encontrado.' });
+    }
+    res.download(filePath, filename);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+/**
+ * Ejecuta manualmente el archivado de logs antiguos a CSV
+ */
+async function triggerLogArchive(req, res) {
+  try {
+    const days = parseInt(req.body?.days || 30, 10);
+    const count = await dbHelper.cleanOldLogs(days);
+    logEvent('info', `Archivado manual de logs ejecutado: ${count} registros exportados a CSV y depurados de la BD.`);
+    res.json({ success: true, archived: count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
 module.exports = {
   getDevices,
   getDevice,
@@ -361,5 +403,8 @@ module.exports = {
   updateSettings,
   clearLogs,
   getLogs,
-  getAccessStats
+  getAccessStats,
+  getLogArchives,
+  downloadLogArchive,
+  triggerLogArchive
 };

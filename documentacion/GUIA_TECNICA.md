@@ -250,6 +250,9 @@ La sincronización masiva interactúa con la API REST institucional:
 * `GET /api/logs`: Consulta registros históricos con soporte de paginación y filtro por torniquete.
 * `GET /api/stats`: Estadísticas acumuladas (total, autorizados, denegados y tasa de éxito).
 * `POST /api/logs/clear`: Purga manual de logs (Solo Admin).
+* `GET /api/logs/archives`: Consulta lista de archivos CSV mensuales disponibles en disco (Solo Admin).
+* `GET /api/logs/archives/:filename`: Descarga segura de archivo CSV mensual histórico (Solo Admin).
+* `POST /api/logs/archive-now`: Ejecución manual inmediata de respaldo y depuración de registros con más de 30 días (Solo Admin).
 * `GET /api/logs-stream`: Canal Server-Sent Events (SSE) para recepción de eventos en tiempo real.
 * `GET /api/devices/:id/events-stream`: Canal SSE dedicado exclusivamente para un torniquete.
 
@@ -259,4 +262,11 @@ La sincronización masiva interactúa con la API REST institucional:
 
 1. **Auto-Recuperación ante Caídas:** Mediante PM2 en Linux (`pm2 startup`) o NSSM en Windows, el proceso se reinicia automáticamente en 1 segundo ante cualquier error o corte de energía.
 2. **Operación Offline:** Los alumnos sin enlace externo o registrados en contingencia reciben validación local garantizada (`/api/mock-external-api/allow`), asegurando el libre tránsito escolar sin depender de conexión a internet.
-3. **Mantenimiento Automatizado:** En el arranque y de forma periódica, el sistema ejecuta limpieza de registros antiguos en SQLite para preservar el alto rendimiento en discos mecánicos o tarjetas SD.
+3. **Mantenimiento Automatizado y Resguardo Mensual Fuera de BD:**
+   - **Objetivo:** Mantener la base de datos SQLite ligera, rápida y libre de bloqueos de I/O en discos o tarjetas SD, sin perder jamás el histórico de accesos de alumnos.
+   - **Archivado Mensual en CSV:** Los registros con antigüedad superior a 30 días se agrupan por mes (`YYYY-MM`) y se guardan o anexan en archivos independientes `logs/archives/accesos-YYYY-MM.csv`.
+   - **Compatibilidad con Microsoft Excel:** Los archivos CSV se generan con encabezado UTF-8 BOM (`\uFEFF`) y escapeado de comillas dobles, garantizando apertura inmediata sin problemas de codificación de caracteres o acentos en Windows y macOS.
+   - **Mecanismo Fail-Safe (Cero Pérdida de Datos):** La sentencia `DELETE FROM access_logs` en SQLite se ejecuta **estrictamente después** de que el sistema operativo confirma la escritura exitosa del archivo en disco (`fs.appendFileSync`). Si ocurre cualquier fallo de hardware o almacenamiento, la transacción de borrado se aborta y los datos se conservan íntegros en SQLite.
+   - **Periodicidad:** Se ejecuta automáticamente durante el arranque del servidor y se programa una revisión diaria silenciosa (`setInterval().unref()`).
+   - **Privacidad y Seguridad Git:** El directorio `logs/` se encuentra registrado en `.gitignore`, previniendo que registros de tránsito confidenciales sean subidos al repositorio de código fuente.
+

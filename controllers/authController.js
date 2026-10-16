@@ -4,27 +4,15 @@ const { logEvent } = require('../utils/logger');
 const {
   verifyPassword,
   hashPassword,
-  isHashed,
-  checkLoginRateLimit,
-  recordFailedLogin,
-  recordSuccessfulLogin
+  isHashed
 } = require('../utils/security');
 
 /**
- * Maneja el inicio de sesión (Administrador o Recepcionista) con control anti-fuerza bruta y hashing scrypt
+ * Maneja el inicio de sesión (Administrador o Recepcionista) sin límite de intentos ni bloqueos temporales
  */
 async function login(req, res) {
   const { username, password } = req.body;
   const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
-
-  // 1. Verificar bloqueo por límite de intentos fallidos
-  const rateLimit = checkLoginRateLimit(clientIp);
-  if (!rateLimit.allowed) {
-    logEvent('warning', `[LOGIN BLOQUEADO] IP ${clientIp} intentó acceder pero está bloqueada temporalmente (${rateLimit.waitSeconds}s restantes).`);
-    return res.status(429).json({
-      error: `Demasiados intentos fallidos. Su acceso está bloqueado temporalmente. Intente nuevamente en ${rateLimit.waitSeconds} segundos.`
-    });
-  }
 
   const cleanUser = username ? String(username).trim() : '';
   const cleanPass = password ? String(password) : '';
@@ -42,7 +30,6 @@ async function login(req, res) {
       const isMatch = verifyPassword(cleanPass, storedPassword);
 
       if (isMatch) {
-        recordSuccessfulLogin(clientIp);
         logEvent('success', `Inicio de sesión de administrador exitoso desde IP: ${clientIp}`);
 
         // Migración transparente automática a scrypt si la contraseña era texto plano
@@ -68,17 +55,9 @@ async function login(req, res) {
 
         return res.json({ success: true, user: userData });
       } else {
-        const failInfo = recordFailedLogin(clientIp);
-        logEvent('warning', `Intento de login admin fallido desde IP ${clientIp}. Intentos restantes: ${failInfo.remainingAttempts}`);
-
-        if (failInfo.locked) {
-          return res.status(429).json({
-            error: `Contraseña incorrecta. Ha excedido el límite de intentos permitidos. Acceso bloqueado por ${Math.ceil(failInfo.waitSeconds / 60)} minutos.`
-          });
-        }
-
+        logEvent('warning', `Intento de login admin con contraseña incorrecta desde IP ${clientIp}.`);
         return res.status(401).json({
-          error: `Contraseña de administrador incorrecta. Intentos restantes: ${failInfo.remainingAttempts}`
+          error: 'Contraseña de administrador incorrecta.'
         });
       }
     }
@@ -87,17 +66,15 @@ async function login(req, res) {
     const receptionist = await dbHelper.getReceptionistByUsername(cleanUser);
 
     if (!receptionist) {
-      const failInfo = recordFailedLogin(clientIp);
       logEvent('warning', `Intento de login con usuario no encontrado "${cleanUser}" desde IP ${clientIp}.`);
       return res.status(401).json({
-        error: `Usuario o contraseña incorrectos. Intentos restantes: ${failInfo.remainingAttempts}`
+        error: 'Usuario o contraseña incorrectos.'
       });
     }
 
     const isMatch = verifyPassword(cleanPass, receptionist.password);
 
     if (isMatch) {
-      recordSuccessfulLogin(clientIp);
       logEvent('success', `Inicio de sesión exitoso de recepcionista: ${receptionist.name} (${receptionist.username}) desde IP: ${clientIp}`);
 
       // Auto-migrar a scrypt si estaba en texto plano
@@ -125,17 +102,9 @@ async function login(req, res) {
 
       return res.json({ success: true, user: userData });
     } else {
-      const failInfo = recordFailedLogin(clientIp);
       logEvent('warning', `Contraseña incorrecta para recepcionista "${cleanUser}" desde IP ${clientIp}.`);
-
-      if (failInfo.locked) {
-        return res.status(429).json({
-          error: `Contraseña incorrecta. Límite de intentos excedido. Acceso bloqueado temporalmente.`
-        });
-      }
-
       return res.status(401).json({
-        error: `Contraseña incorrecta. Intentos restantes: ${failInfo.remainingAttempts}`
+        error: 'Contraseña incorrecta.'
       });
     }
   } catch (err) {

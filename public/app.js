@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const API_LOGS = '/api/logs';
   const API_SETTINGS = '/api/settings';
   const API_CLEAR_LOGS = '/api/logs/clear';
+  const API_LOG_ARCHIVES = '/api/logs/archives';
+  const API_ARCHIVE_NOW = '/api/logs/archive-now';
   const API_RECEPTIONISTS = '/api/receptionists';
 
   // State
@@ -94,6 +96,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const filterLogDevice = document.getElementById('filter-log-device');
   const logsTableBody = document.querySelector('#logs-table tbody');
   const btnClearDbLogs = document.getElementById('btn-clear-db-logs');
+  const btnShowArchives = document.getElementById('btn-show-archives');
+  const archivesModal = document.getElementById('archives-modal');
+  const btnCloseArchivesIcon = document.getElementById('btn-close-archives-icon');
+  const btnCloseArchivesBtn = document.getElementById('btn-close-archives-btn');
+  const btnArchiveNow = document.getElementById('btn-archive-now');
+  const archivesListBody = document.getElementById('archives-list-body');
 
   // Admin Security Settings
   const btnSaveAdminPassword = document.getElementById('btn-save-admin-password');
@@ -1540,6 +1548,118 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
   });
+
+  // ==========================================================================
+  // Monthly Log Archives Modal & Handlers
+  // ==========================================================================
+  async function loadLogArchives() {
+    if (!archivesListBody) return;
+    archivesListBody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding: 1rem;"><i data-lucide="loader" class="spin"></i> Buscando archivos...</td></tr>';
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+      const res = await fetch(API_LOG_ARCHIVES);
+      if (!res.ok) throw new Error('Error al consultar archivos mensuales');
+      const archives = await res.json();
+
+      if (!archives || archives.length === 0) {
+        archivesListBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted" style="padding: 1.25rem;">No hay archivos mensuales generados aún.<br><small>Los registros se archivarán automáticamente cuando superen los 30 días.</small></td></tr>';
+        return;
+      }
+
+      archivesListBody.innerHTML = '';
+      archives.forEach(arch => {
+        const tr = document.createElement('tr');
+        let label = arch.filename;
+        const match = arch.filename.match(/^accesos-(\d{4})-(\d{2})\.csv$/);
+        if (match) {
+          const year = match[1];
+          const monthIdx = parseInt(match[2], 10) - 1;
+          const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+          label = `${months[monthIdx] || match[2]} ${year}`;
+        }
+
+        tr.innerHTML = `
+          <td>
+            <strong>${escapeHTML(label)}</strong>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">${escapeHTML(arch.filename)}</div>
+          </td>
+          <td><span class="badge badge-info" style="font-size: 0.75rem;">${escapeHTML(arch.sizeFormatted)}</span></td>
+          <td style="text-align: right;">
+            <a href="/api/logs/archives/${encodeURIComponent(arch.filename)}" class="btn btn-primary btn-sm" download style="text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; padding: 0.3rem 0.6rem;">
+              <i data-lucide="download" style="width: 14px; height: 14px;"></i> CSV
+            </a>
+          </td>
+        `;
+        archivesListBody.appendChild(tr);
+      });
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      archivesListBody.innerHTML = `<tr><td colspan="3" class="text-center text-danger" style="padding: 1rem;">Error: ${escapeHTML(err.message)}</td></tr>`;
+    }
+  }
+
+  function openArchivesModal() {
+    if (!archivesModal) return;
+    archivesModal.classList.remove('hidden');
+    loadLogArchives();
+  }
+
+  function closeArchivesModal() {
+    if (!archivesModal) return;
+    archivesModal.classList.add('hidden');
+  }
+
+  if (btnShowArchives) {
+    btnShowArchives.addEventListener('click', openArchivesModal);
+  }
+  if (btnCloseArchivesIcon) {
+    btnCloseArchivesIcon.addEventListener('click', closeArchivesModal);
+  }
+  if (btnCloseArchivesBtn) {
+    btnCloseArchivesBtn.addEventListener('click', closeArchivesModal);
+  }
+
+  if (archivesModal) {
+    archivesModal.addEventListener('click', (e) => {
+      if (e.target === archivesModal) closeArchivesModal();
+    });
+  }
+
+  if (btnArchiveNow) {
+    btnArchiveNow.addEventListener('click', async () => {
+      const confirmed = confirm('¿Desea archivar en CSV y purgar de la base de datos los registros de más de 30 días de antigüedad ahora?');
+      if (!confirmed) return;
+
+      btnArchiveNow.disabled = true;
+      const originalText = btnArchiveNow.innerHTML;
+      btnArchiveNow.innerHTML = '<i data-lucide="loader" class="spin"></i> Archivando...';
+      if (window.lucide) window.lucide.createIcons();
+
+      try {
+        const res = await fetch(API_ARCHIVE_NOW, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days: 30 })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Error al archivar logs');
+
+        appendConsoleLog('info', `[Mantenimiento] ${data.archived} registros archivados mensualmente en CSV y depurados de SQLite.`);
+        alert(`Operación completada: se archivaron ${data.archived} registro(s) en CSV.`);
+        loadLogArchives();
+        refreshLogs();
+        refreshStats();
+      } catch (err) {
+        alert(`Error al archivar: ${err.message}`);
+      } finally {
+        btnArchiveNow.disabled = false;
+        btnArchiveNow.innerHTML = originalText;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
 
   // Logout Handler
   if (btnLogout) {
