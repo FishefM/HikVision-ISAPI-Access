@@ -57,6 +57,7 @@ function configureBodyParsers(app) {
           });
           return;
         }
+        if (!req.body) req.body = {};
         next();
       });
       req.on('error', next);
@@ -106,6 +107,7 @@ function configureBodyParsers(app) {
         return;
       }
     }
+    if (!req.body) req.body = {};
     next();
   });
 }

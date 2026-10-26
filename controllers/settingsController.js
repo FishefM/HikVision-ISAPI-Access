@@ -164,12 +164,13 @@ async function deleteDevice(req, res) {
  */
 async function testDevicePing(req, res) {
   try {
-    const deviceId = req.params.id || req.body.deviceId;
-    let ip = req.body.ip;
-    let port = req.body.port;
-    let username = req.body.username;
-    let password = req.body.password;
-    let name = req.body.name || 'MinMoe';
+    const body = req.body || {};
+    const deviceId = req.params.id || body.deviceId;
+    let ip = body.ip;
+    let port = body.port;
+    let username = body.username;
+    let password = body.password;
+    let name = body.name || 'MinMoe';
 
     if (deviceId) {
       const dev = await dbHelper.getDeviceById(deviceId);
@@ -223,7 +224,8 @@ async function testDevicePing(req, res) {
  */
 async function openDoor(req, res) {
   try {
-    const targetDeviceId = req.params.id || req.body.deviceId;
+    const body = req.body || {};
+    const targetDeviceId = req.params.id || body.deviceId;
     let device = null;
 
     if (targetDeviceId) {
