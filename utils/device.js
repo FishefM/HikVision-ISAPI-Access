@@ -17,20 +17,15 @@ function md5(str) {
   return crypto.createHash('md5').update(str).digest('hex');
 }
 
+function sha256(str) {
+  return crypto.createHash('sha256').update(str).digest('hex');
+}
+
 /**
- * Parses the WWW-Authenticate header to extract realm, nonce, qop, etc.
+ * Parses a single Digest challenge string into key-value params.
  */
-function parseWWWAuthenticate(header) {
-  if (!header) return {};
-  const headerStr = Array.isArray(header)
-    ? (header.find(h => String(h).toLowerCase().startsWith('digest')) || header[0])
-    : String(header);
-
-  const match = headerStr.match(/^digest\s+(.*)$/i);
-  if (!match) return {};
-
-  const cleanHeader = match[1];
-  // Split on commas that are followed by a key= (avoids breaking qop="auth,auth-int")
+function parseSingleDigestChallenge(challengeStr) {
+  const cleanHeader = challengeStr.replace(/^digest\s+/i, '').trim();
   const parts = cleanHeader.split(/,\s*(?=[a-zA-Z0-9_-]+\s*=)/);
   const params = {};
   for (const part of parts) {
@@ -45,27 +40,55 @@ function parseWWWAuthenticate(header) {
 }
 
 /**
- * Calculates the Digest Authorization header.
+ * Parses the WWW-Authenticate header to extract realm, nonce, qop, algorithm, etc.
+ * Handles multiple Digest challenges (e.g. SHA-256 + MD5 sent by newer MinMoe firmwares).
+ */
+function parseWWWAuthenticate(header) {
+  if (!header) return {};
+  const rawList = Array.isArray(header) ? header : [String(header)];
+  const challenges = [];
+
+  for (const item of rawList) {
+    // Node.js may join multiple WWW-Authenticate headers with ", Digest "
+    const subItems = String(item).split(/,\s*(?=Digest\s+)/i);
+    for (const sub of subItems) {
+      if (/^digest\s+/i.test(sub.trim())) {
+        challenges.push(parseSingleDigestChallenge(sub.trim()));
+      }
+    }
+  }
+
+  if (challenges.length === 0) return {};
+
+  // Prefer MD5 challenge if multiple are offered, otherwise use the first one
+  const md5Challenge = challenges.find(c => !c.algorithm || c.algorithm.toUpperCase() === 'MD5');
+  return md5Challenge || challenges[0];
+}
+
+/**
+ * Calculates the Digest Authorization header (supports both MD5 and SHA-256).
  */
 function calculateDigestHeader(method, uri, authParams, username, password) {
-  const realm = authParams.realm;
-  const nonce = authParams.nonce;
+  const realm = authParams.realm || '';
+  const nonce = authParams.nonce || '';
   const rawQop = authParams.qop;
   // If server offers auth,auth-int, choose 'auth'
   const qop = rawQop && rawQop.includes('auth') ? 'auth' : rawQop;
   const opaque = authParams.opaque;
+  const algorithm = (authParams.algorithm || '').toUpperCase();
+  const hashFn = algorithm.includes('SHA-256') ? sha256 : md5;
   
-  const HA1 = md5(`${username}:${realm}:${password}`);
-  const HA2 = md5(`${method}:${uri}`);
+  const HA1 = hashFn(`${username}:${realm}:${password}`);
+  const HA2 = hashFn(`${method}:${uri}`);
   
   const nc = '00000001';
   const cnonce = crypto.randomBytes(8).toString('hex');
   
   let response;
   if (qop === 'auth' || qop === 'auth-int') {
-    response = md5(`${HA1}:${nonce}:${nc}:${cnonce}:${qop}:${HA2}`);
+    response = hashFn(`${HA1}:${nonce}:${nc}:${cnonce}:${qop}:${HA2}`);
   } else {
-    response = md5(`${HA1}:${nonce}:${HA2}`);
+    response = hashFn(`${HA1}:${nonce}:${HA2}`);
   }
   
   let authHeader = `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${response}"`;
@@ -174,7 +197,8 @@ async function checkDeviceConnection(deviceIp, devicePort, username, password) {
     return {
       success: isSuccess,
       status: result.status,
-      data: result.data
+      data: result.data,
+      error: isSuccess ? null : `HTTP ${result.status} - ${extractISAPIDiagnostic(result.data, result.statusText || 'Credenciales no autorizadas')}`
     };
   } catch (error) {
     return {
