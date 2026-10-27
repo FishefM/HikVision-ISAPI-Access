@@ -46,10 +46,11 @@ async function login(req, res) {
         const userData = { role: 'admin', name: 'Administrador', username: 'admin' };
         const sessionToken = createSession(userData);
 
+        const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
         res.cookie('admin_session', sessionToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
+          secure: isHttps,
+          sameSite: 'lax',
           maxAge: 3600000 // 1 hora de validez
         });
 
@@ -93,10 +94,11 @@ async function login(req, res) {
       };
       const sessionToken = createSession(userData);
 
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
       res.cookie('admin_session', sessionToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        secure: isHttps,
+        sameSite: 'lax',
         maxAge: 3600000
       });
 

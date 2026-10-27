@@ -98,6 +98,14 @@ function parseCookies(req) {
  * Exenta vistas públicas, recursos estáticos, simulaciones y webhooks del hardware Hikvision.
  */
 const authMiddleware = (req, res, next) => {
+  // Extraer y poblar siempre la sesión si existe cookie válida (necesario para requireAdmin en rutas híbridas como POST /api/devices)
+  const cookies = parseCookies(req);
+  const session = getSession(cookies.admin_session);
+  if (session) {
+    req.session = session;
+    req.user = session.user;
+  }
+
   // Rutas públicas y endpoints del monitor / webhooks
   const publicRoutes = [
     '/login',
@@ -132,12 +140,7 @@ const authMiddleware = (req, res, next) => {
     return next();
   }
 
-  // Verificar la cookie de sesión
-  const cookies = parseCookies(req);
-  const session = getSession(cookies.admin_session);
-  if (session) {
-    req.session = session;
-    req.user = session.user;
+  if (req.user) {
     return next();
   }
 
