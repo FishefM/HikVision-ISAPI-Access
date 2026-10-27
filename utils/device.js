@@ -91,11 +91,11 @@ function calculateDigestHeader(method, uri, authParams, username, password) {
     response = hashFn(`${HA1}:${nonce}:${HA2}`);
   }
   
-  let authHeader = `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${response}"`;
-  if (qop) {
-    authHeader += `, qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
+  let authHeader = `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", cnonce="${cnonce}", nc=${nc}, qop=${qop}, response="${response}"`;
+  if (!qop) {
+    authHeader = `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${response}"`;
   }
-  if (opaque) {
+  if (opaque !== undefined) {
     authHeader += `, opaque="${opaque}"`;
   }
   if (authParams.algorithm) {
@@ -112,14 +112,16 @@ async function sendISAPICommand(deviceIp, devicePort, username, password, method
   const isHttps = String(devicePort) === '443';
   const protocol = isHttps ? 'https' : 'http';
   const url = `${protocol}://${cleanHost}:${devicePort}${path}`;
+  const headers = {};
+  if (xmlBody) {
+    headers['Content-Type'] = 'application/xml';
+  }
   const config = {
     method: method,
     url: url,
     httpsAgent: isHttps ? httpsAgent : undefined,
-    headers: {
-      'Content-Type': 'application/xml',
-    },
-    data: xmlBody,
+    headers: headers,
+    data: xmlBody || undefined,
     validateStatus: (status) => status >= 200 && status < 500, // Permit 401 response for digest challenge
     timeout: 5000, // 5 second timeout
   };
