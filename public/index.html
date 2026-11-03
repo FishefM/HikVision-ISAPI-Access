@@ -114,6 +114,8 @@
             </select>
             <select id="filter-user-status" class="form-input" style="padding: 0.35rem 1.75rem 0.35rem 0.75rem; font-size: 0.8rem; width: auto;" title="Filtrar por estado del alumno">
               <option value="active">Alumnos Activos</option>
+              <option value="with_token">Con Token de Acceso</option>
+              <option value="without_token">Sin Token de Acceso</option>
               <option value="archived">Alumnos Archivados</option>
               <option value="all">Todos los Alumnos</option>
             </select>
@@ -160,6 +162,13 @@
                   <div class="form-group" style="margin-bottom: 0.85rem;">
                     <label for="sync-acuatic-url" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">URL Servidor</label>
                     <input type="url" id="sync-acuatic-url" name="acuatic_url" autocomplete="off" class="form-input" placeholder="https://qa.multihivesoft.com" value="https://qa.multihivesoft.com" style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0.85rem;">
+                    <label class="checkbox-container" style="font-size: 0.75rem; padding-left: 1.5rem; color: var(--text-muted); margin: 0;">
+                      <input type="checkbox" id="sync-acuatic-clear" name="acuatic_clear">
+                      <span class="checkmark" style="height: 14px; width: 14px;"></span>
+                      Limpiar alumnos previos antes de sincronizar
+                    </label>
                   </div>
                   <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.25rem;">
                     <button type="button" id="btn-cancel-sync-menu" class="btn btn-secondary btn-sm" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;">Cancelar</button>
@@ -216,10 +225,18 @@
 
               <div class="form-row">
                 <div class="form-group flex-1">
+                  <label for="user-attendance-token">Attendance Token (Token de Acceso Multihivesoft)</label>
+                  <input type="text" id="user-attendance-token" class="form-input" placeholder="Ej: 59e68f098ada42efc9439550975fe2cdbe89cfdf2f81003e9367e641f6be8307">
+                  <small class="helper-text">Token seguro de 64 caracteres para validar acceso en /api/attendance/scan/{token}.</small>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-1">
                   <label for="user-api-url">API URL de Verificación</label>
-                  <input type="url" id="user-api-url" class="form-input" placeholder="https://multihivesoft.com/api/attendance/scan/cda21c1f...">
+                  <input type="url" id="user-api-url" class="form-input" placeholder="https://qa.multihivesoft.com/api/attendance/scan/cda21c1f...">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.35rem;">
-                    <small class="helper-text">Si se deja en blanco, se asigna automáticamente la validación permitida por defecto.</small>
+                    <small class="helper-text">Si cuenta con Attendance Token, esta URL se completa automáticamente.</small>
                     <span id="user-id-preview" style="font-size: 0.85rem; font-family: monospace; color: var(--accent); font-weight: 600;"></span>
                   </div>
                 </div>
@@ -258,12 +275,13 @@
             <table class="data-table" id="users-table">
               <thead>
                 <tr>
-                  <th style="width: 14%;">Matrícula / ID</th>
-                  <th style="width: 8%; text-align: center;">Foto</th>
-                  <th style="width: 26%;">Nombre Completo</th>
-                  <th style="width: 16%;">Teléfono</th>
-                  <th style="width: 20%;">Torniquetes</th>
-                  <th style="width: 16%; text-align: right;">Acciones</th>
+                  <th style="width: 12%;">Matrícula / ID</th>
+                  <th style="width: 6%; text-align: center;">Foto</th>
+                  <th style="width: 24%;">Nombre Completo</th>
+                  <th style="width: 17%; text-align: center;">Token de Acceso</th>
+                  <th style="width: 13%;">Teléfono</th>
+                  <th style="width: 14%;">Torniquetes</th>
+                  <th style="width: 14%; text-align: right;">Acciones</th>
                 </tr>
               </thead>
               <tbody>

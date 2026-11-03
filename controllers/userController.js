@@ -72,8 +72,21 @@ async function getUsers(req, res) {
       users = users.filter(u => !u.is_archived);
     } else if (status === 'archived') {
       users = users.filter(u => Boolean(u.is_archived));
+    } else if (status === 'with_token') {
+      users = users.filter(u => !u.is_archived && Boolean(u.attendance_token));
+    } else if (status === 'without_token') {
+      users = users.filter(u => !u.is_archived && !u.attendance_token);
     }
-    // Si status === 'all', se incluyen tanto activos como archivados
+    // Si status === 'all', se incluyen todos los registros
+
+    // Ordenar alumnos: los que tienen token primero, y dentro de cada grupo por ID descendente
+    users.sort((a, b) => {
+      const aHas = Boolean(a.attendance_token);
+      const bHas = Boolean(b.attendance_token);
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      return (b.id || 0) - (a.id || 0);
+    });
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.setHeader('Pragma', 'no-cache');
@@ -89,7 +102,7 @@ async function getUsers(req, res) {
  * Crea o actualiza un usuario en la base de datos SQLite y sincroniza con el(los) MinMoe asignado(s).
  */
 async function addUser(req, res) {
-  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id, attendance_token } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
@@ -99,9 +112,13 @@ async function addUser(req, res) {
   last_name = last_name ? String(last_name).trim() : '';
   phone = phone ? String(phone).trim() : '';
   image_file = image_file ? String(image_file).trim() : '';
+  attendance_token = attendance_token ? String(attendance_token).trim() : '';
 
-  // Asignar API URL de validación permitida (allow) por defecto si no se ingresó una
-  if (!api_url) {
+  // Asignar API URL con attendance_token si está disponible, o mock allow por defecto
+  if (attendance_token && (!api_url || api_url.includes('mock-external-api'))) {
+    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+    api_url = `${defaultBaseUrl}/api/attendance/scan/${attendance_token}`;
+  } else if (!api_url) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
@@ -163,6 +180,7 @@ async function addUser(req, res) {
       phone,
       image_file,
       acuaticapp_id,
+      attendance_token: attendance_token || null,
       device_ids: targetDeviceIds
     });
     logEvent('success', `[DB OK] Alumno guardado exitosamente en SQLite local (Registro ID: ${user.id}, User ID: "${user.user_id}").`);
@@ -245,7 +263,7 @@ async function addUser(req, res) {
  */
 async function updateUser(req, res) {
   const id = req.params.id;
-  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id } = req.body;
+  let { user_id, name, api_url, device_ids, assign_all, device_id, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id, attendance_token } = req.body;
   user_id = user_id ? String(user_id).trim() : '';
   name = name ? String(name).trim() : '';
   api_url = api_url ? String(api_url).trim() : '';
@@ -255,6 +273,7 @@ async function updateUser(req, res) {
   last_name = last_name ? String(last_name).trim() : '';
   phone = phone ? String(phone).trim() : '';
   image_file = image_file ? String(image_file).trim() : '';
+  attendance_token = attendance_token !== undefined ? String(attendance_token).trim() : undefined;
 
   if (!name && (first_name || second_name || last_name)) {
     name = [first_name, second_name, last_name].filter(Boolean).join(' ').trim();
@@ -279,7 +298,10 @@ async function updateUser(req, res) {
     }
   }
 
-  if (!api_url) {
+  if (attendance_token && (!api_url || api_url.includes('mock-external-api'))) {
+    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+    api_url = `${defaultBaseUrl}/api/attendance/scan/${attendance_token}`;
+  } else if (!api_url) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
   }
 
@@ -310,6 +332,7 @@ async function updateUser(req, res) {
       phone,
       image_file,
       acuaticapp_id,
+      attendance_token: attendance_token !== undefined ? attendance_token : undefined,
       device_ids: targetDeviceIds
     });
     logEvent('success', `[DB OK] Alumno actualizado en SQLite: ID "${user_id}", Nombre: "${name}".`);
@@ -400,8 +423,19 @@ async function syncAcuaticAppUsers(req, res) {
   const schoolUser = (req.body && req.body.user) || process.env.ACUATICAPP_USER || 'WONDERPUL_BOSQUES';
   const schoolPass = (req.body && req.body.password) || process.env.ACUATICAPP_PASSWORD || 'W16Ku891';
   const baseUrl = (req.body && req.body.baseUrl) || process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+  const clearFirst = req.body && (req.body.clear_first === true || req.body.clear_first === 'true');
 
   logEvent('info', `=== INICIANDO IMPORTACIÓN DESDE ACUATICAPP V2 (${baseUrl}) ===`);
+  if (clearFirst) {
+    logEvent('info', 'Limpiando usuarios previos en base de datos local SQLite antes de sincronizar...');
+    try {
+      await dbHelper.clearUsers();
+      logEvent('success', 'Base de datos de alumnos limpiada correctamente para importación limpia.');
+    } catch (clearErr) {
+      logEvent('warning', `No se pudo limpiar la base de datos: ${clearErr.message}`);
+    }
+  }
+
   logEvent('info', `Autenticando escuela "${schoolUser}"...`);
 
   try {
@@ -455,12 +489,18 @@ async function syncAcuaticAppUsers(req, res) {
         const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
         const matriculaStr = st.matricula ? String(st.matricula).trim() : '';
         const userId = matriculaStr || String(st.id);
+        const attendanceToken = st.attendance_token ? String(st.attendance_token).trim() : null;
+
+        // Construir URL de validación de asistencia con el attendance_token del alumno
+        const studentApiUrl = attendanceToken 
+          ? `${baseUrl}/api/attendance/scan/${attendanceToken}`
+          : 'http://localhost:3000/api/mock-external-api/allow';
 
         try {
           const userResult = await dbHelper.addUser({
             user_id: userId,
             name: fullName,
-            api_url: 'http://localhost:3000/api/mock-external-api/allow',
+            api_url: studentApiUrl,
             matricula: matriculaStr || null,
             first_name: st.name || null,
             second_name: st.second_name || null,
@@ -468,6 +508,7 @@ async function syncAcuaticAppUsers(req, res) {
             phone: st.phone || null,
             image_file: st.image_file || null,
             acuaticapp_id: st.id,
+            attendance_token: attendanceToken,
             device_ids: allDeviceIds
           });
 
@@ -733,12 +774,13 @@ async function getUserQR(req, res) {
   const id = req.params.id;
   try {
     const users = await dbHelper.getUsers();
-    const user = users.find(u => String(u.id) === String(id) || String(u.user_id) === String(id));
+    const user = users.find(u => String(u.id) === String(id) || String(u.user_id) === String(id) || (u.attendance_token && String(u.attendance_token) === String(id)));
     if (!user) {
       return res.status(404).json({ error: 'Alumno no encontrado.' });
     }
 
-    const qrBuffer = await QRCode.toBuffer(String(user.user_id), {
+    const qrContent = user.attendance_token || String(user.user_id);
+    const qrBuffer = await QRCode.toBuffer(qrContent, {
       type: 'png',
       width: 400,
       margin: 2,

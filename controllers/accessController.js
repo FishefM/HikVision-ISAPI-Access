@@ -593,21 +593,30 @@ async function executeAccessValidation(reqInfo, clientIp, device = null) {
     if (apiCallResult.status === 200 && apiResponse) {
       if (apiResponse.student) {
         authorized = true;
-        // Dynamically update the user's name with the one returned by the API
-        user.name = apiResponse.student;
+        if (typeof apiResponse.student === 'string') {
+          user.name = apiResponse.student;
+        } else if (apiResponse.student.name) {
+          user.name = apiResponse.student.name;
+        }
+      } else if (apiResponse.student_name) {
+        authorized = true;
+        user.name = apiResponse.student_name;
       } else if (
         apiResponse.authorized === true ||
         apiResponse.allow === true ||
         apiResponse.status === 'allow' ||
+        apiResponse.status === 'success' ||
         apiResponse.access === 'grant' ||
-        apiResponse.access === true
+        apiResponse.access === true ||
+        apiResponse.success === true
       ) {
         authorized = true;
       } else if (apiResponse.message && 
                 (apiResponse.message.toLowerCase().includes('asistencia') || 
                 apiResponse.message.toLowerCase().includes('registrada') || 
                 apiResponse.message.toLowerCase().includes('éxito') ||
-                apiResponse.message.toLowerCase().includes('exito'))) {
+                apiResponse.message.toLowerCase().includes('exito') ||
+                apiResponse.message.toLowerCase().includes('permitido'))) {
         authorized = true;
       }
     }

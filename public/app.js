@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userMatriculaInput = document.getElementById('user-matricula');
   const userPhoneInput = document.getElementById('user-phone');
   const userImageFileInput = document.getElementById('user-image-file');
+  const userAttendanceTokenInput = document.getElementById('user-attendance-token');
   const userIdPreview = document.getElementById('user-id-preview');
   const userApiUrlInput = document.getElementById('user-api-url');
   const userDevicesCheckboxes = document.getElementById('user-devices-checkboxes');
@@ -860,7 +861,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (window.lucide) window.lucide.createIcons();
 
-      appendConsoleLog('info', `Iniciando sincronización con AcuaticApp (Usuario: "${userVal}")...`);
+      const clearFirst = Boolean(document.getElementById('sync-acuatic-clear')?.checked);
+
+      appendConsoleLog('info', `Iniciando sincronización con AcuaticApp (Usuario: "${userVal}"${clearFirst ? ', limpieza previa activada' : ''})...`);
 
       try {
         const res = await fetch('/api/users/sync-acuaticapp', {
@@ -869,9 +872,16 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify({
             user: userVal,
             password: passVal,
-            baseUrl: urlVal || 'https://qa.multihivesoft.com'
+            baseUrl: urlVal || 'https://qa.multihivesoft.com',
+            clear_first: clearFirst
           })
         });
+
+        if (res.status === 401) {
+          alert('Tu sesión en el panel del torniquete ha expirado. Inicia sesión nuevamente en el panel para continuar.');
+          window.location.href = '/login';
+          return;
+        }
 
         const data = await res.json();
         if (res.ok && data.success) {
@@ -930,7 +940,7 @@ document.addEventListener('DOMContentLoaded', () => {
     usersTableBody.innerHTML = '';
     
     if (usersList.length === 0) {
-      usersTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 1.5rem;">No se encontraron alumnos que coincidan con la búsqueda.</td></tr>`;
+      usersTableBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding: 1.5rem;">No se encontraron alumnos que coincidan con la búsqueda.</td></tr>`;
       return;
     }
 
@@ -959,12 +969,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const isArchived = Boolean(user.is_archived);
-      const acuaticBadge = user.acuaticapp_id 
-        ? `<span class="badge badge-info" style="font-size:0.65rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem;">AcuaticApp</span>` 
-        : '';
       const archivedBadge = isArchived 
         ? `<span class="badge badge-warning" style="font-size:0.65rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem;" title="Alumno archivado - Acceso inactivo"><i data-lucide="archive" style="width:10px;height:10px;"></i> Archivado</span>` 
         : '';
+
+      const hasToken = Boolean(user.attendance_token);
+      const tokenCellHtml = hasToken
+        ? `<span class="badge badge-success" style="font-size:0.75rem; padding: 0.2rem 0.55rem; display: inline-flex; align-items: center; gap: 0.35rem;" title="Token: ${escapeHTML(user.attendance_token)}">
+             <i data-lucide="key-round" style="width:12px;height:12px;"></i> Con Token
+           </span>`
+        : `<span class="badge badge-secondary" style="font-size:0.75rem; padding: 0.2rem 0.55rem; opacity: 0.65; display: inline-flex; align-items: center; gap: 0.35rem;" title="Este alumno no tiene token registrado en AcuaticApp">
+             <i data-lucide="slash" style="width:12px;height:12px;"></i> Sin Token
+           </span>`;
 
       const archiveBtnHtml = isArchived
         ? `<button class="btn btn-icon-only text-warning archive-user-btn" data-id="${user.id}" title="Reactivar Alumno (Restaurar Acceso)"><i data-lucide="archive-restore"></i></button>`
@@ -981,10 +997,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>
           <div style="display: flex; align-items: center; flex-wrap: wrap;">
             <strong>${escapeHTML(user.name)}</strong>
-            ${acuaticBadge}
             ${archivedBadge}
           </div>
         </td>
+        <td style="text-align: center;">${tokenCellHtml}</td>
         <td><span class="text-muted" style="font-size:0.85rem;">${user.phone ? escapeHTML(user.phone) : '—'}</span></td>
         <td>${devicesBadge}</td>
         <td class="actions-col" style="text-align: right;">
@@ -1279,6 +1295,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   userApiUrlInput.addEventListener('input', updateUserIdPreview);
+  if (userAttendanceTokenInput) {
+    userAttendanceTokenInput.addEventListener('input', () => {
+      const token = userAttendanceTokenInput.value.trim();
+      if (token && (!userApiUrlInput.value || userApiUrlInput.value.includes('mock-external-api'))) {
+        userApiUrlInput.value = `https://qa.multihivesoft.com/api/attendance/scan/${token}`;
+        updateUserIdPreview();
+      }
+    });
+  }
 
   function showUserForm(user = null) {
     userFormContainer.classList.remove('hidden');
@@ -1324,6 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userMatriculaInput) userMatriculaInput.value = user.matricula || user.user_id || '';
       if (userPhoneInput) userPhoneInput.value = user.phone || '';
       if (userImageFileInput) userImageFileInput.value = user.image_file || '';
+      if (userAttendanceTokenInput) userAttendanceTokenInput.value = user.attendance_token || '';
       if (userApiUrlInput) {
         userApiUrlInput.value = (user.api_url && user.api_url !== 'http://localhost:3000/api/mock-external-api/allow') ? user.api_url : '';
       }
@@ -1350,6 +1376,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userMatriculaInput) userMatriculaInput.value = '';
       if (userPhoneInput) userPhoneInput.value = '';
       if (userImageFileInput) userImageFileInput.value = '';
+      if (userAttendanceTokenInput) userAttendanceTokenInput.value = '';
       if (userApiUrlInput) userApiUrlInput.value = '';
 
       // Asignación de torniquetes por defecto (todos seleccionados)
@@ -1389,8 +1416,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.lucide) window.lucide.createIcons();
     }
     
+    const attendanceToken = userAttendanceTokenInput ? userAttendanceTokenInput.value.trim() : '';
+    
     let apiUrlValue = userApiUrlInput ? userApiUrlInput.value.trim() : '';
-    if (!apiUrlValue) {
+    if (!apiUrlValue && attendanceToken) {
+      apiUrlValue = `https://qa.multihivesoft.com/api/attendance/scan/${attendanceToken}`;
+    } else if (!apiUrlValue) {
       apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
     }
 
@@ -1434,6 +1465,7 @@ document.addEventListener('DOMContentLoaded', () => {
       phone: phone,
       image_file: imageFile,
       acuaticapp_id: acuaticId,
+      attendance_token: attendanceToken || null,
       api_url: apiUrlValue,
       assign_all: assignAll,
       device_ids: selectedDeviceIds

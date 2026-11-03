@@ -37,6 +37,9 @@ function initializeDatabase() {
         phone TEXT,
         image_file TEXT,
         acuaticapp_id INTEGER,
+        attendance_token TEXT,
+        is_archived INTEGER DEFAULT 0,
+        is_deleted INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -52,6 +55,7 @@ function initializeDatabase() {
         if (!colNames.includes('phone')) db.run("ALTER TABLE users ADD COLUMN phone TEXT");
         if (!colNames.includes('image_file')) db.run("ALTER TABLE users ADD COLUMN image_file TEXT");
         if (!colNames.includes('acuaticapp_id')) db.run("ALTER TABLE users ADD COLUMN acuaticapp_id INTEGER");
+        if (!colNames.includes('attendance_token')) db.run("ALTER TABLE users ADD COLUMN attendance_token TEXT");
         if (!colNames.includes('is_archived')) db.run("ALTER TABLE users ADD COLUMN is_archived INTEGER DEFAULT 0");
         if (!colNames.includes('is_deleted')) db.run("ALTER TABLE users ADD COLUMN is_deleted INTEGER DEFAULT 0");
       }
@@ -423,7 +427,7 @@ const getUsers = (filter, deviceId, search = '') => new Promise((res, rej) => {
     query += ` WHERE ${conditions.join(' AND ')} `;
   }
 
-  query += ` GROUP BY u.id ORDER BY u.id DESC `;
+  query += ` GROUP BY u.id ORDER BY (CASE WHEN u.attendance_token IS NOT NULL AND u.attendance_token != '' THEN 0 ELSE 1 END) ASC, u.id DESC `;
 
   db.all(query, params, (err, rows) => {
     if (err) return rej(err);
@@ -442,6 +446,7 @@ const getUsers = (filter, deviceId, search = '') => new Promise((res, rej) => {
         phone: r.phone,
         image_file: r.image_file,
         acuaticapp_id: r.acuaticapp_id,
+        attendance_token: r.attendance_token,
         is_archived: Boolean(r.is_archived),
         is_deleted: Boolean(r.is_deleted),
         created_at: r.created_at,
@@ -470,7 +475,7 @@ const getUserById = (userId) => new Promise((res, rej) => {
   if (!userId) return res(null);
   const cleanId = String(userId).trim();
   
-  db.get("SELECT * FROM users WHERE user_id = ? OR matricula = ? OR id = ? OR acuaticapp_id = ?", [cleanId, cleanId, cleanId, cleanId], async (err, row) => {
+  db.get("SELECT * FROM users WHERE user_id = ? OR matricula = ? OR id = ? OR acuaticapp_id = ? OR attendance_token = ?", [cleanId, cleanId, cleanId, cleanId, cleanId], async (err, row) => {
     if (err) return rej(err);
     if (row) {
       const device_ids = await getUserDeviceIds(row.user_id).catch(() => []);
@@ -483,8 +488,10 @@ const getUserById = (userId) => new Promise((res, rej) => {
       const match = rows.find(u => 
         cleanId === u.user_id || 
         (u.matricula && cleanId === u.matricula) ||
+        (u.attendance_token && cleanId === u.attendance_token) ||
         cleanId.includes(u.user_id) || 
         (u.matricula && cleanId.includes(u.matricula)) ||
+        (u.attendance_token && cleanId.includes(u.attendance_token)) ||
         (u.api_url && cleanId.includes(u.api_url)) ||
         (u.api_url && u.api_url.includes(cleanId))
       );
@@ -498,7 +505,7 @@ const getUserById = (userId) => new Promise((res, rej) => {
 });
 
 const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => new Promise(async (res, rej) => {
-  let userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, targetDeviceIds;
+  let userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, attendanceToken, targetDeviceIds;
 
   if (typeof userData === 'object' && userData !== null) {
     userId = userData.user_id;
@@ -511,6 +518,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
     phone = userData.phone || null;
     imageFile = userData.image_file || null;
     acuaticappId = userData.acuaticapp_id || null;
+    attendanceToken = userData.attendance_token || null;
     targetDeviceIds = userData.device_ids || legacyName; // In case passed as (obj, deviceIds)
   } else {
     userId = userData;
@@ -531,14 +539,15 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
     userId = matricula || (acuaticappId ? String(acuaticappId) : null);
   }
 
-  // Prevenir duplicados (buscar por user_id, matricula o acuaticapp_id existente)
+  // Prevenir duplicados (buscar por user_id, matricula, acuaticapp_id o attendance_token existente)
   const lookupUserId = userId ? String(userId).trim() : '___NULL___';
   const lookupMatricula = matricula ? String(matricula).trim() : '___NULL___';
   const lookupAcuaticId = acuaticappId ? Number(acuaticappId) : -1;
+  const lookupAttendanceToken = attendanceToken ? String(attendanceToken).trim() : '___NULL___';
 
   db.get(
-    "SELECT id, user_id FROM users WHERE user_id = ? OR (matricula IS NOT NULL AND matricula = ?) OR (acuaticapp_id IS NOT NULL AND acuaticapp_id = ?) LIMIT 1",
-    [lookupUserId, lookupMatricula, lookupAcuaticId],
+    "SELECT id, user_id FROM users WHERE user_id = ? OR (matricula IS NOT NULL AND matricula = ?) OR (acuaticapp_id IS NOT NULL AND acuaticapp_id = ?) OR (attendance_token IS NOT NULL AND attendance_token = ?) LIMIT 1",
+    [lookupUserId, lookupMatricula, lookupAcuaticId, lookupAttendanceToken],
     async (err, existing) => {
       if (err) return rej(err);
 
@@ -556,6 +565,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             phone: phone || undefined,
             image_file: imageFile || undefined,
             acuaticapp_id: acuaticappId || undefined,
+            attendance_token: attendanceToken || undefined,
             is_deleted: userData.is_deleted !== undefined ? (userData.is_deleted ? 1 : 0) : 0,
             is_archived: userData.is_archived !== undefined ? (userData.is_archived ? 1 : 0) : 0,
             device_ids: targetDeviceIds
@@ -572,6 +582,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             phone,
             image_file: imageFile,
             acuaticapp_id: acuaticappId,
+            attendance_token: attendanceToken,
             is_updated: true
           });
         } catch (updErr) {
@@ -581,9 +592,9 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
 
       // Si no existe, insertar nuevo
       db.run(
-        `INSERT INTO users (user_id, name, api_url, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId],
+        `INSERT INTO users (user_id, name, api_url, matricula, first_name, second_name, last_name, phone, image_file, acuaticapp_id, attendance_token) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, attendanceToken],
         async function(insErr) {
           if (insErr) return rej(insErr);
           const lastId = this.lastID;
@@ -607,6 +618,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             phone,
             image_file: imageFile,
             acuaticapp_id: acuaticappId,
+            attendance_token: attendanceToken,
             device_ids: devicesToAssign,
             is_created: true
           });
@@ -617,7 +629,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
 });
 
 const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => new Promise((res, rej) => {
-  let userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, targetDeviceIds;
+  let userId, name, apiUrl, matricula, firstName, secondName, lastName, phone, imageFile, acuaticappId, attendanceToken, targetDeviceIds;
   let isArchived, isDeleted;
 
   if (typeof userData === 'object' && userData !== null) {
@@ -631,6 +643,7 @@ const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = nu
     phone = userData.phone;
     imageFile = userData.image_file;
     acuaticappId = userData.acuaticapp_id;
+    attendanceToken = userData.attendance_token;
     isArchived = userData.is_archived;
     isDeleted = userData.is_deleted;
     targetDeviceIds = userData.device_ids !== undefined ? userData.device_ids : legacyName;
@@ -658,6 +671,7 @@ const updateUser = (id, userData, legacyName, legacyApiUrl, legacyDeviceIds = nu
   if (phone !== undefined) { fields.push("phone = ?"); values.push(phone); }
   if (imageFile !== undefined) { fields.push("image_file = ?"); values.push(imageFile); }
   if (acuaticappId !== undefined) { fields.push("acuaticapp_id = ?"); values.push(acuaticappId); }
+  if (attendanceToken !== undefined) { fields.push("attendance_token = ?"); values.push(attendanceToken); }
   if (isArchived !== undefined) { fields.push("is_archived = ?"); values.push(isArchived ? 1 : 0); }
   if (isDeleted !== undefined) { fields.push("is_deleted = ?"); values.push(isDeleted ? 1 : 0); }
 
@@ -707,6 +721,18 @@ const deleteUser = (id) => new Promise((res, rej) => {
       db.run("UPDATE users SET is_deleted = 1 WHERE id = ?", [id], function(updErr) {
         if (updErr) rej(updErr);
         else res(this.changes);
+      });
+    });
+  });
+});
+
+const clearUsers = () => new Promise((resolve, reject) => {
+  db.serialize(() => {
+    db.run("DELETE FROM user_devices", [], (err) => {
+      if (err) return reject(err);
+      db.run("DELETE FROM users", [], (uErr) => {
+        if (uErr) return reject(uErr);
+        resolve(true);
       });
     });
   });
@@ -1038,6 +1064,7 @@ module.exports = {
   updateUser,
   setUserArchived,
   deleteUser,
+  clearUsers,
   getLogs,
   getAccessStats,
   addLog,
