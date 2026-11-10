@@ -89,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userDevicesCheckboxes = document.getElementById('user-devices-checkboxes');
   const userAssignAllCheckbox = document.getElementById('user-assign-all');
   const btnCancelUser = document.getElementById('btn-cancel-user');
+  const btnSyncUserDevices = document.getElementById('btn-sync-user-devices');
   const filterUserDevice = document.getElementById('filter-user-device');
   const filterUserStatus = document.getElementById('filter-user-status');
   const usersTableBody = document.querySelector('#users-table tbody');
@@ -739,12 +740,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const syncAcuaticUrlInput = document.getElementById('sync-acuatic-url');
   const btnSubmitSync = document.getElementById('btn-submit-sync');
 
-  // Recuperar credenciales previamente guardadas si existen
+  // Recuperar credenciales previamente guardadas si existen (ignorando defaults antiguos de QA)
   try {
     const savedUser = localStorage.getItem('acuaticapp_sync_user');
-    if (savedUser && syncAcuaticUserInput) syncAcuaticUserInput.value = savedUser;
+    if (savedUser && savedUser !== 'WONDERPUL_BOSQUES' && syncAcuaticUserInput) syncAcuaticUserInput.value = savedUser;
     const savedUrl = localStorage.getItem('acuaticapp_sync_url');
-    if (savedUrl && (savedUrl.startsWith('http://') || savedUrl.startsWith('https://'))) {
+    if (savedUrl && savedUrl !== 'https://qa.multihivesoft.com' && (savedUrl.startsWith('http://') || savedUrl.startsWith('https://'))) {
       if (syncAcuaticUrlInput) syncAcuaticUrlInput.value = savedUrl;
     } else if (savedUrl) {
       localStorage.removeItem('acuaticapp_sync_url');
@@ -753,7 +754,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function openSyncMenu() {
     if (!syncAcuaticMenu) return;
+    syncAcuaticMenu.style.left = '';
+    syncAcuaticMenu.style.right = '0';
     syncAcuaticMenu.classList.remove('hidden');
+
+    // Evitar que el menú se corte por el borde izquierdo si el botón hizo wrap a la izquierda
+    const rect = syncAcuaticMenu.getBoundingClientRect();
+    if (rect.left < 12) {
+      syncAcuaticMenu.style.right = 'auto';
+      syncAcuaticMenu.style.left = '0';
+    }
+
     if (window.lucide) window.lucide.createIcons();
     setTimeout(() => {
       if (syncAcuaticUserInput && !syncAcuaticUserInput.value) {
@@ -872,7 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify({
             user: userVal,
             password: passVal,
-            baseUrl: urlVal || 'https://qa.multihivesoft.com',
+            baseUrl: urlVal || 'https://multihivesoft.com',
             clear_first: clearFirst
           })
         });
@@ -1299,7 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
     userAttendanceTokenInput.addEventListener('input', () => {
       const token = userAttendanceTokenInput.value.trim();
       if (token && (!userApiUrlInput.value || userApiUrlInput.value.includes('mock-external-api'))) {
-        userApiUrlInput.value = `https://qa.multihivesoft.com/api/attendance/scan/${token}`;
+        userApiUrlInput.value = `https://multihivesoft.com/api/attendance/scan/${token}`;
         updateUserIdPreview();
       }
     });
@@ -1358,6 +1369,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const userDevs = user.device_ids || [];
       populateDeviceCheckboxes(userDevs.length > 0 ? userDevs : null);
 
+      if (btnSyncUserDevices) {
+        btnSyncUserDevices.style.display = 'inline-flex';
+      }
+
       updateUserIdPreview();
       setTimeout(() => {
         if (userFirstNameInput) userFirstNameInput.focus();
@@ -1365,6 +1380,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       userFormTitle.textContent = 'Registrar Nuevo Alumno';
       if (submitBtn) submitBtn.textContent = 'Guardar Alumno';
+
+      if (btnSyncUserDevices) {
+        btnSyncUserDevices.style.display = 'none';
+      }
 
       userForm.reset();
       userDbIdInput.value = '';
@@ -1399,10 +1418,65 @@ document.addEventListener('DOMContentLoaded', () => {
     if (userAcuaticAppIdInput) userAcuaticAppIdInput.value = '';
     if (userApiUrlInput) userApiUrlInput.value = '';
     if (userIdPreview) userIdPreview.textContent = '';
+    if (btnSyncUserDevices) {
+      btnSyncUserDevices.style.display = 'none';
+      btnSyncUserDevices.disabled = false;
+      btnSyncUserDevices.innerHTML = `<i data-lucide="upload-cloud" style="width: 14px; height: 14px;"></i> Registrar en dispositivos MinMoe`;
+    }
   }
 
   btnShowAddUser.addEventListener('click', () => showUserForm());
   btnCancelUser.addEventListener('click', () => hideUserForm());
+
+  if (btnSyncUserDevices) {
+    btnSyncUserDevices.addEventListener('click', async () => {
+      const dbId = userDbIdInput.value;
+      if (!dbId) {
+        alert('Debes seleccionar un alumno para sincronizar.');
+        return;
+      }
+
+      // Obtener los torniquetes marcados en ese momento en los checkboxes
+      const checkedBoxes = document.querySelectorAll('input[name="user_device_checkbox"]:checked');
+      const selectedDeviceIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value, 10)).filter(Boolean);
+
+      if (devicesList.length > 0 && selectedDeviceIds.length === 0) {
+        alert('Debes seleccionar al menos un torniquete permitido en la lista.');
+        return;
+      }
+
+      const originalText = btnSyncUserDevices.innerHTML;
+      btnSyncUserDevices.disabled = true;
+      btnSyncUserDevices.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width: 14px; height: 14px;"></i> Registrando en MinMoe...`;
+      if (window.lucide) window.lucide.createIcons();
+
+      try {
+        appendConsoleLog('info', `[MinMoe] Enviando registro del alumno a los dispositivos seleccionados...`);
+        const res = await fetch(`/api/users/${dbId}/sync-device`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_ids: selectedDeviceIds })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          appendConsoleLog('success', `[MinMoe OK] Sincronización exitosa: ${data.summary}`);
+          alert(`[Registro en MinMoe Exitoso]\n${data.summary}\n\n${(data.diagnostics || []).join('\n')}`);
+        } else {
+          const errMsg = data.error || data.summary || 'No se pudo conectar con los dispositivos MinMoe.';
+          appendConsoleLog('warning', `[MinMoe Aviso] ${errMsg}`);
+          alert(`[Resultado de Registro en MinMoe]\n${errMsg}\n\n${(data.diagnostics || []).join('\n')}`);
+        }
+      } catch (err) {
+        appendConsoleLog('error', `[MinMoe ERROR] Error al intentar registrar en dispositivos: ${err.message}`);
+        alert(`Error de red al intentar registrar en los MinMoe: ${err.message}`);
+      } finally {
+        btnSyncUserDevices.disabled = false;
+        btnSyncUserDevices.innerHTML = originalText;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    });
+  }
 
   userForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1420,7 +1494,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     let apiUrlValue = userApiUrlInput ? userApiUrlInput.value.trim() : '';
     if (!apiUrlValue && attendanceToken) {
-      apiUrlValue = `https://qa.multihivesoft.com/api/attendance/scan/${attendanceToken}`;
+      apiUrlValue = `https://multihivesoft.com/api/attendance/scan/${attendanceToken}`;
     } else if (!apiUrlValue) {
       apiUrlValue = 'http://localhost:3000/api/mock-external-api/allow';
     }

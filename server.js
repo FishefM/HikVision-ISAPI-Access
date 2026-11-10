@@ -1,4 +1,8 @@
 require('dotenv').config();
+const dns = require('dns');
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -11,6 +15,7 @@ const requestLogger = require('./middleware/requestLogger');
 // Import routes
 const apiRoutes = require('./routes/api');
 const deviceRoutes = require('./routes/device');
+const { initAcuaticAppAutoSync } = require('./controllers/userController');
 
 // Initialize application
 const app = express();
@@ -65,4 +70,7 @@ app.listen(PORT, () => {
   console.log(`  Admin Dashboard: http://localhost:${PORT}`);
   console.log(`======================================================\n`);
   logEvent('info', `Servidor iniciado en puerto ${PORT}`);
+
+  // Iniciar sincronización automática recurrente cada 24 horas con AcuaticApp
+  initAcuaticAppAutoSync();
 });

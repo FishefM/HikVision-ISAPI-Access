@@ -1,8 +1,64 @@
 const crypto = require('crypto');
+const dns = require('dns');
+const https = require('https');
+const http = require('http');
+const axios = require('axios');
 const QRCode = require('qrcode');
 const dbHelper = require('../config/database');
 const { logEvent } = require('../utils/logger');
 const deviceHelper = require('../utils/device');
+
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
+// Resolver DNS rápido con respaldo público (1.1.1.1 / 8.8.8.8) para evitar bloqueos de MagicDNS/IPv6
+const fastResolver = new dns. promises.Resolver();
+fastResolver.setServers(['1.1.1.1', '8.8.8.8', '100.100.100.100']);
+const dnsCache = new Map();
+
+function fastDnsLookup(hostname, options, callback) {
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  const wantAll = Boolean(options && options.all);
+  const reply = (ip) => {
+    if (wantAll) {
+      return callback(null, [{ address: ip, family: 4 }]);
+    }
+    return callback(null, ip, 4);
+  };
+
+  if ( netIsIPv4(hostname) ) {
+    return reply(hostname);
+  }
+
+  const cached = dnsCache.get(hostname);
+  if (cached && cached.expiresAt > Date.now()) {
+    return reply(cached.ip);
+  }
+
+  fastResolver.resolve4(hostname)
+    .then((addresses) => {
+      if (addresses && addresses.length > 0) {
+        const ip = addresses[0];
+        dnsCache.set(hostname, { ip, expiresAt: Date.now() + 300000 }); // 5 min cache
+        return reply(ip);
+      }
+      dns.lookup(hostname, { family: 4, all: wantAll }, callback);
+    })
+    .catch(() => {
+      dns.lookup(hostname, { family: 4, all: wantAll }, callback);
+    });
+}
+
+function netIsIPv4(host) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+}
+
+const ipv4HttpAgent = new http.Agent({ keepAlive: true, family: 4, lookup: fastDnsLookup });
+const ipv4HttpsAgent = new https.Agent({ keepAlive: true, family: 4, lookup: fastDnsLookup });
 
 //-----------------------------------
 //----------CRUD Usuarios------------
@@ -116,7 +172,7 @@ async function addUser(req, res) {
 
   // Asignar API URL con attendance_token si está disponible, o mock allow por defecto
   if (attendance_token && (!api_url || api_url.includes('mock-external-api'))) {
-    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://multihivesoft.com';
     api_url = `${defaultBaseUrl}/api/attendance/scan/${attendance_token}`;
   } else if (!api_url) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
@@ -299,7 +355,7 @@ async function updateUser(req, res) {
   }
 
   if (attendance_token && (!api_url || api_url.includes('mock-external-api'))) {
-    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
+    const defaultBaseUrl = process.env.ACUATICAPP_BASE_URL || 'https://multihivesoft.com';
     api_url = `${defaultBaseUrl}/api/attendance/scan/${attendance_token}`;
   } else if (!api_url) {
     api_url = 'http://localhost:3000/api/mock-external-api/allow';
@@ -416,18 +472,120 @@ async function updateUser(req, res) {
 }
 
 /**
- * Importa y sincroniza todos los alumnos desde la API v2 de AcuaticApp
- * hacia la base de datos local SQLite con URL de acceso permitido por defecto.
+ * Ejecuta petición HTTP con IPv4 forzado, DNS rápido, timeout y reintentos automáticos
  */
-async function syncAcuaticAppUsers(req, res) {
-  const schoolUser = (req.body && req.body.user) || process.env.ACUATICAPP_USER || 'WONDERPUL_BOSQUES';
-  const schoolPass = (req.body && req.body.password) || process.env.ACUATICAPP_PASSWORD || 'W16Ku891';
-  const baseUrl = (req.body && req.body.baseUrl) || process.env.ACUATICAPP_BASE_URL || 'https://qa.multihivesoft.com';
-  const clearFirst = req.body && (req.body.clear_first === true || req.body.clear_first === 'true');
+async function fetchWithRetry(url, options = {}, { maxRetries = 3, timeoutMs = 20000, label = 'API AcuaticApp' } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let dataPayload = options.body;
+      if (typeof dataPayload === 'string') {
+        try { dataPayload = JSON.parse(dataPayload); } catch (_) {}
+      }
 
-  logEvent('info', `=== INICIANDO IMPORTACIÓN DESDE ACUATICAPP V2 (${baseUrl}) ===`);
+      const response = await axios({
+        url,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        data: dataPayload,
+        timeout: timeoutMs,
+        httpAgent: ipv4HttpAgent,
+        httpsAgent: ipv4HttpsAgent,
+        validateStatus: () => true
+      });
+
+      if (response.status >= 500 && attempt < maxRetries) {
+        throw new Error(`Servidor respondió HTTP ${response.status}`);
+      }
+
+      return {
+        ok: response.status >= 200 && response.status < 300,
+        status: response.status,
+        json: async () => response.data
+      };
+    } catch (err) {
+      lastError = err;
+      const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || err.name === 'TimeoutError' || err.name === 'AbortError' || /timeout|aborted/i.test(err.message);
+      const reason = isTimeout ? `tiempo de espera agotado (${timeoutMs / 1000}s)` : err.message;
+
+      if (attempt < maxRetries) {
+        const delayMs = attempt * 1500;
+        logEvent('warning', `[AcuaticApp] Intento ${attempt}/${maxRetries} falló en ${label} (${reason}). Reintentando en ${delayMs / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Lógica central para importar y sincronizar alumnos desde la API v2 de AcuaticApp
+ * Reutilizable tanto por la ruta HTTP como por la sincronización automática cada 24 horas.
+ */
+async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = false, trigger = 'manual' } = {}) {
+  const schoolUser = user || process.env.ACUATICAPP_USER || '';
+  const schoolPass = password || process.env.ACUATICAPP_PASSWORD || '';
+  const apiBaseUrl = baseUrl || process.env.ACUATICAPP_BASE_URL || 'https://multihivesoft.com';
+
+  logEvent('info', `=== INICIANDO SINCRONIZACIÓN ${trigger === 'auto' ? 'AUTOMÁTICA (24h)' : 'DESDE ACUATICAPP'} (${apiBaseUrl}) ===`);
+  logEvent('info', `Autenticando escuela "${schoolUser}"...`);
+
+  // 1. Login en AcuaticApp (con reintento automático)
+  const loginRes = await fetchWithRetry(
+    `${apiBaseUrl}/api/school/login`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: schoolUser, password: schoolPass })
+    },
+    { maxRetries: 3, timeoutMs: 20000, label: `login de "${schoolUser}"` }
+  );
+
+  const loginData = await loginRes.json();
+  if (!loginRes.ok || !loginData.token) {
+    throw new Error(loginData.message || `Fallo de autenticación en AcuaticApp (HTTP ${loginRes.status})`);
+  }
+
+  const token = loginData.token;
+  const schoolInfo = loginData.school || {};
+  logEvent('success', `[AcuaticApp OK] Escuela autenticada exitosamente (ID: ${schoolInfo.id || 'N/A'}). Extrayendo lista de alumnos...`);
+
+  // 2. Extraer todas las páginas de alumnos en memoria antes de modificar o limpiar la BD local
+  let currentPage = 1;
+  let lastPage = 1;
+  const extractedStudents = [];
+
+  while (currentPage <= lastPage) {
+    logEvent('info', `Consultando página ${currentPage}${lastPage > 1 ? `/${lastPage}` : ''} de alumnos en AcuaticApp...`);
+    const studentsRes = await fetchWithRetry(
+      `${apiBaseUrl}/api/v2/administration/student/getStudents?page=${currentPage}&per_page=50`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      },
+      { maxRetries: 3, timeoutMs: 20000, label: `consulta de alumnos (página ${currentPage})` }
+    );
+
+    if (!studentsRes.ok) {
+      throw new Error(`Error al consultar alumnos en página ${currentPage} (HTTP ${studentsRes.status})`);
+    }
+
+    const studentsData = await studentsRes.json();
+    const studentsList = studentsData.data || [];
+    lastPage = parseInt(studentsData.last_page || 1, 10);
+
+    extractedStudents.push(...studentsList);
+    currentPage++;
+  }
+
+  logEvent('info', `[AcuaticApp] Extracción exitosa: ${extractedStudents.length} alumnos descargados. Guardando en base de datos local...`);
+
+  // 3. Limpiar usuarios previos SOLO si fue solicitado explícitamente y tras descargar exitosamente
   if (clearFirst) {
-    logEvent('info', 'Limpiando usuarios previos en base de datos local SQLite antes de sincronizar...');
+    logEvent('info', 'Limpiando usuarios previos en base de datos local SQLite antes de insertar los nuevos...');
     try {
       await dbHelper.clearUsers();
       logEvent('success', 'Base de datos de alumnos limpiada correctamente para importación limpia.');
@@ -436,111 +594,104 @@ async function syncAcuaticAppUsers(req, res) {
     }
   }
 
-  logEvent('info', `Autenticando escuela "${schoolUser}"...`);
+  // 4. Guardar los alumnos extraídos en SQLite
+  let totalProcessed = 0;
+  let createdCount = 0;
+  let updatedCount = 0;
+  const allDevices = await dbHelper.getDevices();
+  const allDeviceIds = allDevices.map(d => d.id);
 
-  try {
-    // 1. Login en AcuaticApp
-    const loginRes = await fetch(`${baseUrl}/api/school/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: schoolUser, password: schoolPass }),
-      signal: AbortSignal.timeout(10000)
-    });
+  for (const st of extractedStudents) {
+    const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
+    const matriculaStr = st.matricula ? String(st.matricula).trim() : '';
+    const userId = matriculaStr || String(st.id);
+    const attendanceToken = st.attendance_token ? String(st.attendance_token).trim() : null;
 
-    const loginData = await loginRes.json();
-    if (!loginRes.ok || !loginData.token) {
-      throw new Error(loginData.message || `Fallo de autenticación en AcuaticApp (HTTP ${loginRes.status})`);
-    }
+    const studentApiUrl = attendanceToken 
+      ? `${apiBaseUrl}/api/attendance/scan/${attendanceToken}`
+      : 'http://localhost:3000/api/mock-external-api/allow';
 
-    const token = loginData.token;
-    const schoolInfo = loginData.school || {};
-    logEvent('success', `[AcuaticApp OK] Escuela autenticada exitosamente (ID: ${schoolInfo.id || 'N/A'}). Obteniendo lista de alumnos...`);
-
-    // 2. Obtener lista paginada de alumnos
-    let currentPage = 1;
-    let lastPage = 1;
-    let totalProcessed = 0;
-    let createdCount = 0;
-    let updatedCount = 0;
-    const allDevices = await dbHelper.getDevices();
-    const allDeviceIds = allDevices.map(d => d.id);
-
-    while (currentPage <= lastPage) {
-      logEvent('info', `Consultando página ${currentPage} de alumnos en AcuaticApp...`);
-      const studentsRes = await fetch(`${baseUrl}/api/v2/administration/student/getStudents?page=${currentPage}&per_page=50`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        signal: AbortSignal.timeout(15000)
+    try {
+      const userResult = await dbHelper.addUser({
+        user_id: userId,
+        name: fullName,
+        api_url: studentApiUrl,
+        matricula: matriculaStr || null,
+        first_name: st.name || null,
+        second_name: st.second_name || null,
+        last_name: st.last_name || null,
+        phone: st.phone || null,
+        image_file: st.image_file || null,
+        acuaticapp_id: st.id,
+        attendance_token: attendanceToken,
+        device_ids: allDeviceIds
       });
 
-      if (!studentsRes.ok) {
-        throw new Error(`Error al consultar alumnos en página ${currentPage} (HTTP ${studentsRes.status})`);
+      if (userResult.is_created) {
+        createdCount++;
+      } else {
+        updatedCount++;
       }
-
-      const studentsData = await studentsRes.json();
-      const studentsList = studentsData.data || [];
-      lastPage = parseInt(studentsData.last_page || 1, 10);
-
-      for (const st of studentsList) {
-        // Construir nombre completo y campos
-        const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
-        const matriculaStr = st.matricula ? String(st.matricula).trim() : '';
-        const userId = matriculaStr || String(st.id);
-        const attendanceToken = st.attendance_token ? String(st.attendance_token).trim() : null;
-
-        // Construir URL de validación de asistencia con el attendance_token del alumno
-        const studentApiUrl = attendanceToken 
-          ? `${baseUrl}/api/attendance/scan/${attendanceToken}`
-          : 'http://localhost:3000/api/mock-external-api/allow';
-
-        try {
-          const userResult = await dbHelper.addUser({
-            user_id: userId,
-            name: fullName,
-            api_url: studentApiUrl,
-            matricula: matriculaStr || null,
-            first_name: st.name || null,
-            second_name: st.second_name || null,
-            last_name: st.last_name || null,
-            phone: st.phone || null,
-            image_file: st.image_file || null,
-            acuaticapp_id: st.id,
-            attendance_token: attendanceToken,
-            device_ids: allDeviceIds
-          });
-
-          if (userResult.is_created) {
-            createdCount++;
-          } else {
-            updatedCount++;
-          }
-          totalProcessed++;
-        } catch (uErr) {
-          logEvent('warning', `No se pudo procesar alumno ID ${st.id} (${fullName}): ${uErr.message}`);
-        }
-      }
-
-      currentPage++;
+      totalProcessed++;
+    } catch (uErr) {
+      logEvent('warning', `No se pudo procesar alumno ID ${st.id} (${fullName}): ${uErr.message}`);
     }
+  }
 
-    const summary = `Sincronización completada: ${totalProcessed} alumnos procesados (${createdCount} nuevos, ${updatedCount} actualizados).`;
-    logEvent('success', `=== ${summary.toUpperCase()} ===`);
+  const summary = `Sincronización completada: ${totalProcessed} alumnos procesados (${createdCount} nuevos, ${updatedCount} actualizados).`;
+  logEvent('success', `=== ${summary.toUpperCase()} ===`);
 
-    res.json({
-      success: true,
-      total: totalProcessed,
-      created: createdCount,
-      updated: updatedCount,
-      school: schoolInfo,
-      message: summary
+  return {
+    success: true,
+    total: totalProcessed,
+    created: createdCount,
+    updated: updatedCount,
+    school: schoolInfo,
+    message: summary
+  };
+}
+
+/**
+ * Importa y sincroniza todos los alumnos desde la API v2 de AcuaticApp (manualmente vía REST)
+ */
+async function syncAcuaticAppUsers(req, res) {
+  try {
+    const result = await performAcuaticAppSync({
+      user: req.body && req.body.user,
+      password: req.body && req.body.password,
+      baseUrl: req.body && req.body.baseUrl,
+      clearFirst: req.body && (req.body.clear_first === true || req.body.clear_first === 'true'),
+      trigger: 'manual'
     });
+    res.json(result);
   } catch (err) {
     logEvent('error', `[AcuaticApp ERROR] Fallo durante la importación: ${err.message}`);
     res.status(500).json({ error: `Fallo al sincronizar con AcuaticApp: ${err.message}` });
   }
+}
+
+/**
+ * Inicia el cron / intervalo de sincronización automática recurrente cada 24 horas
+ */
+function initAcuaticAppAutoSync() {
+  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+  // Programar tarea recurrente cada 24 horas
+  const timer = setInterval(async () => {
+    logEvent('info', '[Auto-Sync] Iniciando ciclo diario de sincronización automática de alumnos...');
+    try {
+      const res = await performAcuaticAppSync({ clearFirst: false, trigger: 'auto' });
+      logEvent('success', `[Auto-Sync OK] ${res.message}`);
+    } catch (err) {
+      logEvent('warning', `[Auto-Sync AVISO] No se pudo completar la sincronización automática: ${err.message}`);
+    }
+  }, TWENTY_FOUR_HOURS_MS);
+
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+
+  logEvent('info', '[Auto-Sync] Sincronización automática de alumnos configurada cada 24 horas.');
 }
 
 /**
@@ -716,18 +867,27 @@ async function syncSingleUser(req, res) {
   const id = req.params.id;
   try {
     const users = await dbHelper.getUsers();
-    const user = users.find(u => String(u.id) === String(id));
+    let user = users.find(u => String(u.id) === String(id));
 
     if (!user) {
       return res.status(404).json({ error: 'Alumno no encontrado en la base de datos.' });
     }
 
+    // Si se enviaron device_ids en el body (ej. seleccionados en el formulario antes de guardar), usarlos
+    let requestedDeviceIds = null;
+    if (req.body && Array.isArray(req.body.device_ids)) {
+      requestedDeviceIds = req.body.device_ids.map(Number).filter(Boolean);
+      // Guardar la actualización de torniquetes asignados en SQLite si se especificó
+      await dbHelper.updateUser(user.id, { device_ids: requestedDeviceIds });
+      user.device_ids = requestedDeviceIds;
+    }
+
     const allDevices = await dbHelper.getDevices();
-    const userDeviceIds = user.device_ids || [];
+    const userDeviceIds = requestedDeviceIds || user.device_ids || [];
     const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
 
     if (targetDevices.length === 0) {
-      return res.status(400).json({ error: 'El usuario no tiene ningún torniquete asignado.' });
+      return res.status(400).json({ error: 'El alumno no tiene ningún torniquete permitido seleccionado.' });
     }
 
     logEvent('info', `[MinMoe] Sincronizando alumno individual: ${user.name} (ID: ${user.user_id}) en ${targetDevices.length} torniquete(s)...`);
@@ -885,5 +1045,7 @@ module.exports = {
   syncAllUsers,
   syncSingleUser,
   syncAcuaticAppUsers,
+  performAcuaticAppSync,
+  initAcuaticAppAutoSync,
   getUserQR
 };

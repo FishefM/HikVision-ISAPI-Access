@@ -148,12 +148,12 @@
                 <form id="sync-acuatic-form" autocomplete="off" style="margin-top: 0.65rem;">
                   <div class="form-group" style="margin-bottom: 0.65rem;">
                     <label for="sync-acuatic-user" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Usuario / Escuela</label>
-                    <input type="text" id="sync-acuatic-user" name="acuatic_user" autocomplete="off" class="form-input" placeholder="WONDERPUL_BOSQUES" value="WONDERPUL_BOSQUES" required style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                    <input type="text" id="sync-acuatic-user" name="acuatic_user" autocomplete="off" class="form-input" placeholder="Usuario o Escuela" value="" required style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
                   </div>
                   <div class="form-group" style="margin-bottom: 0.65rem;">
                     <label for="sync-acuatic-password" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Contraseña</label>
                     <div style="position: relative; display: flex; align-items: center;">
-                      <input type="password" id="sync-acuatic-password" name="acuatic_pwd" autocomplete="new-password" class="form-input" placeholder="Contraseña de acceso" value="W16Ku891" required style="font-size: 0.8rem; padding: 0.45rem 2rem 0.45rem 0.65rem; width: 100%;">
+                      <input type="password" id="sync-acuatic-password" name="acuatic_pwd" autocomplete="new-password" class="form-input" placeholder="Contraseña de acceso" value="" required style="font-size: 0.8rem; padding: 0.45rem 2rem 0.45rem 0.65rem; width: 100%;">
                       <button type="button" id="btn-toggle-sync-pwd" title="Mostrar/Ocultar contraseña" style="position: absolute; right: 0.5rem; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; display: flex; align-items: center;">
                         <i data-lucide="eye" style="width: 14px; height: 14px;"></i>
                       </button>
@@ -161,7 +161,7 @@
                   </div>
                   <div class="form-group" style="margin-bottom: 0.85rem;">
                     <label for="sync-acuatic-url" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">URL Servidor</label>
-                    <input type="url" id="sync-acuatic-url" name="acuatic_url" autocomplete="off" class="form-input" placeholder="https://qa.multihivesoft.com" value="https://qa.multihivesoft.com" style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                    <input type="url" id="sync-acuatic-url" name="acuatic_url" autocomplete="off" class="form-input" placeholder="https://multihivesoft.com" value="https://multihivesoft.com" style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
                   </div>
                   <div class="form-group" style="margin-bottom: 0.85rem;">
                     <label class="checkbox-container" style="font-size: 0.75rem; padding-left: 1.5rem; color: var(--text-muted); margin: 0;">
@@ -234,7 +234,7 @@
               <div class="form-row">
                 <div class="form-group flex-1">
                   <label for="user-api-url">API URL de Verificación</label>
-                  <input type="url" id="user-api-url" class="form-input" placeholder="https://qa.multihivesoft.com/api/attendance/scan/cda21c1f...">
+                  <input type="url" id="user-api-url" class="form-input" placeholder="https://multihivesoft.com/api/attendance/scan/cda21c1f...">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.35rem;">
                     <small class="helper-text">Si cuenta con Attendance Token, esta URL se completa automáticamente.</small>
                     <span id="user-id-preview" style="font-size: 0.85rem; font-family: monospace; color: var(--accent); font-weight: 600;"></span>
@@ -263,7 +263,10 @@
                 </small>
               </div>
 
-              <div class="btn-group justify-end" style="display: flex; gap: 0.5rem;">
+              <div class="btn-group justify-end" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <button type="button" id="btn-sync-user-devices" class="btn btn-secondary btn-sm" style="display: none; border-color: rgba(0, 210, 255, 0.4); color: var(--accent);">
+                  <i data-lucide="upload-cloud" style="width: 14px; height: 14px;"></i> Registrar en dispositivos MinMoe
+                </button>
                 <button type="button" id="btn-cancel-user" class="btn btn-secondary btn-sm">Cancelar</button>
                 <button type="submit" class="btn btn-primary btn-sm">Guardar Alumno</button>
               </div>

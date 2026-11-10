@@ -1260,8 +1260,20 @@ select.form-input {
 /* ==========================================================================
    AcuaticApp Sync Dropdown Mini Menu
    ========================================================================== */
+.users-section {
+  position: relative;
+  z-index: 50;
+}
+
 .users-section > .panel {
   overflow: visible !important;
+  position: relative;
+  z-index: 50;
+}
+
+.users-section .panel-header {
+  position: relative;
+  z-index: 60;
 }
 
 .sync-acuatic-wrapper {
@@ -1273,13 +1285,14 @@ select.form-input {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 320px;
+  width: 350px;
+  max-width: calc(100vw - 2rem);
   background: #18202d;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-md);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06);
   padding: 1rem;
-  z-index: 1050;
+  z-index: 2000;
   backdrop-filter: blur(16px);
   animation: syncMenuFadeIn 0.15s ease-out;
 }
