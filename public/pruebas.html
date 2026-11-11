@@ -180,6 +180,57 @@
           </div>
         </div>
 
+        <!-- Inspección y Canales de Flujo en Vivo por Torniquete -->
+        <div class="panel glass" style="margin-top: 1.5rem;">
+          <div class="panel-header">
+            <div class="panel-title">
+              <i data-lucide="radio"></i>
+              <h2>Canales y Logs en Vivo del MinMoe</h2>
+            </div>
+          </div>
+          <div class="panel-body" style="font-size: 0.85rem;">
+            <p style="color: var(--text-muted); margin-bottom: 0.85rem;">
+              Abre en una nueva pestaña los canales directos en tiempo real (Server-Sent Events) o la consulta JSON de cada torniquete:
+            </p>
+
+            <div class="form-group" style="margin-bottom: 0.85rem;">
+              <label for="inspect-device-select">Seleccionar Torniquete</label>
+              <select id="inspect-device-select" class="form-input">
+                <!-- Se llena dinámicamente -->
+              </select>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem;">
+              <button type="button" id="btn-open-logs-stream" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; font-size: 0.78rem;">
+                <i data-lucide="terminal" style="width: 13px; height: 13px; color: var(--accent);"></i>
+                <span>Ver Logs en Vivo</span>
+                <i data-lucide="external-link" style="width: 11px; height: 11px; opacity: 0.7;"></i>
+              </button>
+              <button type="button" id="btn-open-events-stream" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; font-size: 0.78rem;">
+                <i data-lucide="activity" style="width: 13px; height: 13px; color: var(--success);"></i>
+                <span>Ver Eventos SSE</span>
+                <i data-lucide="external-link" style="width: 11px; height: 11px; opacity: 0.7;"></i>
+              </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr; gap: 0.5rem;">
+              <button type="button" id="btn-open-db-logs-json" class="btn btn-secondary btn-sm" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; font-size: 0.78rem;">
+                <i data-lucide="database" style="width: 13px; height: 13px; color: var(--warning);"></i>
+                <span>Consultar JSON Histórico (/api/logs)</span>
+                <i data-lucide="external-link" style="width: 11px; height: 11px; opacity: 0.7;"></i>
+              </button>
+            </div>
+
+            <!-- Previsualización de URLs -->
+            <div style="margin-top: 0.85rem; padding: 0.6rem 0.75rem; background: rgba(0,0,0,0.3); border-radius: 6px; border: 1px solid var(--border-color); font-family: monospace; font-size: 0.75rem;">
+              <div style="color: var(--text-muted); font-size: 0.7rem; margin-bottom: 0.3rem;">RUTAS ACTIVAS PARA EL DISPOSITIVO SELECCIONADO:</div>
+              <div id="preview-url-logs" style="color: #38bdf8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">/devices/1/logs-stream</div>
+              <div id="preview-url-events" style="color: #4ade80; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;">/devices/1/events-stream</div>
+              <div id="preview-url-endpoint" style="color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;">/devices/1/remoteCheck</div>
+            </div>
+          </div>
+        </div>
+
 
         <!-- Mock APIs Info Card -->
         <div class="panel glass" style="margin-top: 1.5rem;">

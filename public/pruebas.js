@@ -35,6 +35,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const simResultDetail = document.getElementById('sim-result-detail');
   const btnTestOpen = document.getElementById('btn-test-open');
 
+  // Elementos para inspección de canales y rutas SSE
+  const inspectDeviceSelect = document.getElementById('inspect-device-select');
+  const btnOpenLogsStream = document.getElementById('btn-open-logs-stream');
+  const btnOpenEventsStream = document.getElementById('btn-open-events-stream');
+  const btnOpenDbLogsJson = document.getElementById('btn-open-db-logs-json');
+  const previewUrlLogs = document.getElementById('preview-url-logs');
+  const previewUrlEvents = document.getElementById('preview-url-events');
+  const previewUrlEndpoint = document.getElementById('preview-url-endpoint');
+
 
   const testUsersTableBody = document.querySelector('#test-users-table tbody');
   const btnShowAddTestUser = document.getElementById('btn-show-add-test-user');
@@ -181,6 +190,51 @@ document.addEventListener('DOMContentLoaded', () => {
         testOpenDeviceSelect.appendChild(opt);
       });
     }
+
+    if (inspectDeviceSelect) {
+      inspectDeviceSelect.innerHTML = '';
+      devicesList.forEach(dev => {
+        const opt = document.createElement('option');
+        opt.value = dev.id;
+        opt.textContent = `${dev.name} (ID: ${dev.id} - ${dev.ip})`;
+        if (dev.is_default) opt.selected = true;
+        inspectDeviceSelect.appendChild(opt);
+      });
+      updateInspectUrlsPreview();
+    }
+  }
+
+  function updateInspectUrlsPreview() {
+    const devId = inspectDeviceSelect ? inspectDeviceSelect.value : '1';
+    if (previewUrlLogs) previewUrlLogs.textContent = `/devices/${devId}/logs-stream`;
+    if (previewUrlEvents) previewUrlEvents.textContent = `/devices/${devId}/events-stream`;
+    if (previewUrlEndpoint) previewUrlEndpoint.textContent = `/devices/${devId}/remoteCheck`;
+  }
+
+  if (inspectDeviceSelect) {
+    inspectDeviceSelect.addEventListener('change', updateInspectUrlsPreview);
+  }
+
+  if (btnOpenLogsStream) {
+    btnOpenLogsStream.addEventListener('click', () => {
+      const devId = inspectDeviceSelect ? inspectDeviceSelect.value : '1';
+      window.open(`/devices/${devId}/logs-stream`, '_blank');
+    });
+  }
+
+  if (btnOpenEventsStream) {
+    btnOpenEventsStream.addEventListener('click', () => {
+      const devId = inspectDeviceSelect ? inspectDeviceSelect.value : '1';
+      window.open(`/devices/${devId}/events-stream`, '_blank');
+    });
+  }
+
+  if (btnOpenDbLogsJson) {
+    btnOpenDbLogsJson.addEventListener('click', () => {
+      const devId = inspectDeviceSelect ? inspectDeviceSelect.value : '';
+      const url = devId ? `/api/logs?deviceId=${devId}&limit=50` : '/api/logs?limit=50';
+      window.open(url, '_blank');
+    });
   }
 
   async function refreshTestUsers() {
