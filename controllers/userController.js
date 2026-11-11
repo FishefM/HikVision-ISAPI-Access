@@ -403,31 +403,45 @@ async function updateUser(req, res) {
   
   let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
   if (targetDevices.length > 0) {
-    // Si la matrícula o user_id cambió, remover el ID anterior del hardware MinMoe para no dejar huérfanos
-    if (existing && existing.user_id && String(existing.user_id).trim() !== String(user_id).trim()) {
-      logEvent('info', `[MinMoe] Matrícula modificada de "${existing.user_id}" a "${user_id}". Removiendo registro antiguo en torniquetes...`);
+    // Si la matrícula, user_id o token cambió, remover el ID anterior del hardware MinMoe para no dejar huérfanos
+    const oldMinMoeId = (existing && existing.attendance_token && String(existing.attendance_token).trim().length >= 8)
+      ? String(existing.attendance_token).trim().substring(0, 8)
+      : (existing && existing.user_id ? String(existing.user_id).trim() : null);
+
+    const newMinMoeId = (attendance_token && String(attendance_token).trim().length >= 8)
+      ? String(attendance_token).trim().substring(0, 8)
+      : String(user_id).trim();
+
+    if (oldMinMoeId && oldMinMoeId !== newMinMoeId) {
+      logEvent('info', `[MinMoe] Identificador en MinMoe modificado de "${oldMinMoeId}" a "${newMinMoeId}". Removiendo registro antiguo en torniquetes...`);
       allDevices.forEach(dev => {
         if (dev.ip && dev.username && dev.password) {
-          deviceHelper.deleteUserFromDevice({
-            device_ip: dev.ip,
-            device_port: dev.port || 80,
-            device_user: dev.username,
-            device_password: dev.password
-          }, existing.user_id).catch(() => {});
+          deviceHelper.deleteUserFromDevice(
+            dev.ip,
+            dev.port || 80,
+            dev.username,
+            dev.password,
+            oldMinMoeId
+          ).catch(() => {});
         }
       });
     }
 
     const syncPromises = targetDevices.map(async (dev) => {
       if (dev.ip && dev.username && dev.password) {
-        logEvent('info', `[MinMoe - ${dev.name}] Actualizando datos de "${name}" (${user_id}) en ${dev.ip}...`);
+        logEvent('info', `[MinMoe - ${dev.name}] Actualizando datos de "${name}" (${newMinMoeId}) en ${dev.ip}...`);
         try {
           const syncRes = await deviceHelper.syncFullUserToDevice({
             device_ip: dev.ip,
             device_port: dev.port || 80,
             device_user: dev.username,
             device_password: dev.password
-          }, { user_id, name, image_file });
+          }, {
+            user_id,
+            name,
+            image_file,
+            attendance_token: attendance_token !== undefined ? attendance_token : (existing ? existing.attendance_token : null)
+          });
           return { dev, syncRes };
         } catch (e) {
           return { dev, syncRes: { synced: false, summary: e.message, diagnostics: [e.message] } };
@@ -708,33 +722,44 @@ async function deleteUser(req, res) {
       return res.json({ success: true, message: 'Usuario no encontrado previamente.' });
     }
 
-    // Paso 1: Eliminar del hardware biométrico MinMoe de todos los torniquetes donde esté asignado
+    // Paso 1: Eliminar del hardware biométrico MinMoe de todos los torniquetes registrados
     const allDevices = await dbHelper.getDevices();
-    const userDeviceIds = targetUser.device_ids || [];
-    const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
+    const activeDevices = allDevices.filter(d => d.ip && d.username && d.password);
 
     let deletedCount = 0;
     const diagnostics = [];
 
-    for (const dev of targetDevices) {
-      if (dev.ip && dev.username && dev.password) {
-        logEvent('info', `[MinMoe - ${dev.name}] Eliminando alumno "${targetUser.name}" (${targetUser.user_id}) en ${dev.ip}...`);
+    // Recolectar todos los identificadores posibles con los que pudo haber sido enrolado en MinMoe
+    const idsToClean = new Set();
+    if (targetUser.attendance_token && String(targetUser.attendance_token).trim().length >= 8) {
+      idsToClean.add(String(targetUser.attendance_token).trim().substring(0, 8));
+    }
+    if (targetUser.user_id) idsToClean.add(String(targetUser.user_id).trim());
+    if (targetUser.matricula) idsToClean.add(String(targetUser.matricula).trim());
+
+    for (const dev of activeDevices) {
+      logEvent('info', `[MinMoe - ${dev.name}] Eliminando alumno "${targetUser.name}" (${Array.from(idsToClean).join(', ')}) en ${dev.ip}...`);
+      let devDeleted = false;
+      for (const cleanId of idsToClean) {
         const devRes = await deviceHelper.deleteUserFromDevice(
           dev.ip,
           dev.port || 80,
           dev.username,
           dev.password,
-          targetUser.user_id
-        );
+          cleanId
+        ).catch(() => ({ success: false }));
 
-        if (devRes.success) {
-          deletedCount++;
-          logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${targetUser.name}" eliminado del torniquete.`);
-        } else {
-          logEvent('warning', `[MinMoe ADVERTENCIA - ${dev.name}] ${devRes.summary}`);
+        if (devRes && devRes.success) devDeleted = true;
+        if (devRes && devRes.diagnostics) {
+          devRes.diagnostics.forEach(diag => diagnostics.push(`[${dev.name}] ${diag}`));
         }
+      }
 
-        devRes.diagnostics.forEach(diag => diagnostics.push(`[${dev.name}] ${diag}`));
+      if (devDeleted) {
+        deletedCount++;
+        logEvent('success', `[MinMoe OK - ${dev.name}] Alumno "${targetUser.name}" eliminado del torniquete.`);
+      } else {
+        logEvent('warning', `[MinMoe AVISO - ${dev.name}] Finalizó intento de borrado para "${targetUser.name}".`);
       }
     }
 
@@ -744,9 +769,9 @@ async function deleteUser(req, res) {
 
     res.json({
       success: true,
-      message: `Alumno "${targetUser.name}" eliminado de la web y de los torniquetes (conservado en BD).`,
+      message: `Alumno "${targetUser.name}" eliminado de la web y de los torniquetes MinMoe.`,
       deviceDeleted: deletedCount > 0,
-      deviceSummary: `${deletedCount}/${targetDevices.length} torniquete(s) procesados`,
+      deviceSummary: `${deletedCount}/${activeDevices.length} torniquete(s) procesados`,
       diagnostics
     });
   } catch (e) {
@@ -994,26 +1019,36 @@ async function toggleArchiveUser(req, res) {
 
     // Manejo de sincronización con el hardware MinMoe
     const allDevices = await dbHelper.getDevices();
+    const activeDevices = allDevices.filter(d => d.ip && d.username && d.password);
     const userDeviceIds = user.device_ids || [];
     const targetDevices = allDevices.filter(d => userDeviceIds.length === 0 || userDeviceIds.includes(d.id));
 
     let deviceSummary = '';
     if (isArchived) {
       let deletedCount = 0;
-      for (const dev of targetDevices) {
-        if (dev.ip && dev.username && dev.password) {
+      const idsToClean = new Set();
+      if (user.attendance_token && String(user.attendance_token).trim().length >= 8) {
+        idsToClean.add(String(user.attendance_token).trim().substring(0, 8));
+      }
+      if (user.user_id) idsToClean.add(String(user.user_id).trim());
+      if (user.matricula) idsToClean.add(String(user.matricula).trim());
+
+      for (const dev of activeDevices) {
+        let devDeleted = false;
+        for (const cleanId of idsToClean) {
           const devRes = await deviceHelper.deleteUserFromDevice(
             dev.ip,
             dev.port || 80,
             dev.username,
             dev.password,
-            user.user_id
+            cleanId
           ).catch(() => ({ success: false }));
-          if (devRes && devRes.success) deletedCount++;
+          if (devRes && devRes.success) devDeleted = true;
         }
+        if (devDeleted) deletedCount++;
       }
-      deviceSummary = `${deletedCount}/${targetDevices.length} torniquete(s) actualizados`;
-      logEvent('info', `[ARCHIVO] Alumno "${user.name}" (${user.user_id}) archivado. Acceso revocado en torniquetes.`);
+      deviceSummary = `${deletedCount}/${activeDevices.length} torniquete(s) actualizados`;
+      logEvent('info', `[ARCHIVO] Alumno "${user.name}" (${user.user_id}) archivado. Acceso revocado y eliminado de los torniquetes MinMoe.`);
     } else {
       let syncedCount = 0;
       for (const dev of targetDevices) {

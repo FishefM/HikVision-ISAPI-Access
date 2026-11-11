@@ -120,10 +120,14 @@
               <option value="all">Todos los Alumnos</option>
             </select>
             <div class="sync-acuatic-wrapper">
-              <button id="btn-sync-acuaticapp" type="button" class="btn btn-secondary btn-sm" title="Importar y sincronizar catálogo de alumnos desde AcuaticApp v2">
-                <i data-lucide="cloud-download" style="width: 14px; height: 14px; color: var(--accent);"></i> Sincronizar AcuaticApp
-                <i data-lucide="chevron-down" style="width: 12px; height: 12px; margin-left: 3px; opacity: 0.8;"></i>
-              </button>
+              <div style="display: inline-flex; align-items: stretch;">
+                <button id="btn-sync-acuatic-direct" type="button" class="btn btn-secondary btn-sm" style="border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 1px solid rgba(255,255,255,0.12); display: inline-flex; align-items: center; gap: 0.4rem;" title="Sincronizar manualmente con AcuaticApp de inmediato usando las credenciales configuradas">
+                  <i data-lucide="cloud-download" style="width: 14px; height: 14px; color: var(--accent);"></i> Sincronizar AcuaticApp
+                </button>
+                <button id="btn-sync-acuaticapp" type="button" class="btn btn-secondary btn-sm" style="border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0.4rem 0.55rem; display: inline-flex; align-items: center; justify-content: center;" title="Opciones avanzadas y credenciales manuales de AcuaticApp">
+                  <i data-lucide="chevron-down" style="width: 13px; height: 13px; opacity: 0.85;"></i>
+                </button>
+              </div>
 
               <!-- Mini menú desplegable de credenciales manuales para AcuaticApp -->
               <div id="sync-acuatic-menu" class="sync-dropdown-menu hidden">
@@ -137,23 +141,15 @@
                   </button>
                 </div>
 
-                <!-- Aviso de entorno de pruebas -->
-                <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 6px; padding: 0.5rem 0.65rem; margin-top: 0.65rem; display: flex; align-items: flex-start; gap: 0.5rem;">
-                  <span class="badge badge-info" style="font-size: 0.62rem; padding: 0.15rem 0.4rem; text-transform: uppercase; font-weight: 700; flex-shrink: 0; margin-top: 1px;">INFO</span>
-                  <div style="font-size: 0.72rem; color: #bae6fd; line-height: 1.35;">
-                    Esta opción solo se realizó en un entorno de pruebas. Para más información contacte con los desarrolladores de AcuaticApp.
-                  </div>
-                </div>
-
                 <form id="sync-acuatic-form" autocomplete="off" style="margin-top: 0.65rem;">
                   <div class="form-group" style="margin-bottom: 0.65rem;">
                     <label for="sync-acuatic-user" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Usuario / Escuela</label>
-                    <input type="text" id="sync-acuatic-user" name="acuatic_user" autocomplete="off" class="form-input" placeholder="Usuario o Escuela" value="" required style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
+                    <input type="text" id="sync-acuatic-user" name="acuatic_user" autocomplete="off" class="form-input" placeholder="Opcional: usar credenciales del servidor" value="" style="font-size: 0.8rem; padding: 0.45rem 0.65rem;">
                   </div>
                   <div class="form-group" style="margin-bottom: 0.65rem;">
                     <label for="sync-acuatic-password" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; display: block; font-weight: 500;">Contraseña</label>
                     <div style="position: relative; display: flex; align-items: center;">
-                      <input type="password" id="sync-acuatic-password" name="acuatic_pwd" autocomplete="new-password" class="form-input" placeholder="Contraseña de acceso" value="" required style="font-size: 0.8rem; padding: 0.45rem 2rem 0.45rem 0.65rem; width: 100%;">
+                      <input type="password" id="sync-acuatic-password" name="acuatic_pwd" autocomplete="new-password" class="form-input" placeholder="Opcional: usar credenciales del servidor" value="" style="font-size: 0.8rem; padding: 0.45rem 2rem 0.45rem 0.65rem; width: 100%;">
                       <button type="button" id="btn-toggle-sync-pwd" title="Mostrar/Ocultar contraseña" style="position: absolute; right: 0.5rem; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; display: flex; align-items: center;">
                         <i data-lucide="eye" style="width: 14px; height: 14px;"></i>
                       </button>

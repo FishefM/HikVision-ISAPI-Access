@@ -602,9 +602,21 @@ async function syncFullUserToDevice(settings, user) {
   let userSuccess = false;
   let cardSuccess = false;
 
-  // 1. Sincronizar información básica de usuario (CREAR primero con Record POST)
-  const userRes = await syncUserInfo(ip, port, userAuth, pass, user.user_id, user.name);
-  diagnostics.push(`Usuario (${user.name}): ${userRes.diagnostic}`);
+  // Determinar identificador para el MinMoe: registrar el token minimizado (8 caracteres) del QR si existe
+  const minMoeId = (user.attendance_token && String(user.attendance_token).trim().length >= 8)
+    ? String(user.attendance_token).trim().substring(0, 8)
+    : String(user.user_id).trim();
+
+  // Si el identificador del MinMoe es el token de 8 chars y difiere del user_id, remover registro previo con user_id
+  if (user.user_id && minMoeId !== String(user.user_id).trim()) {
+    try {
+      await deleteUserFromDevice(ip, port, userAuth, pass, user.user_id);
+    } catch (_) {}
+  }
+
+  // 1. Sincronizar información básica de usuario (CREAR primero con Record POST) con el token minimizado
+  const userRes = await syncUserInfo(ip, port, userAuth, pass, minMoeId, user.name);
+  diagnostics.push(`Usuario (${user.name} - ${minMoeId}): ${userRes.diagnostic}`);
   userSuccess = userRes.success;
 
   // Si el usuario no existe en la base de datos del MinMoe, no tiene sentido intentar vincular tarjeta
@@ -619,9 +631,9 @@ async function syncFullUserToDevice(settings, user) {
     };
   }
 
-  // 2. Sincronizar tarjeta (asociada al user_id)
-  const cardRes = await syncCardInfo(ip, port, userAuth, pass, user.user_id, user.user_id);
-  diagnostics.push(`Tarjeta (${user.user_id}): ${cardRes.diagnostic}`);
+  // 2. Sincronizar tarjeta (asociada al token minimizado)
+  const cardRes = await syncCardInfo(ip, port, userAuth, pass, minMoeId, minMoeId);
+  diagnostics.push(`Tarjeta (${minMoeId}): ${cardRes.diagnostic}`);
   cardSuccess = cardRes.success;
 
   const overallSuccess = userSuccess && cardSuccess;
@@ -637,20 +649,41 @@ async function syncFullUserToDevice(settings, user) {
 
 /**
  * Deletes a user and their cards from the Hikvision MinMoe terminal.
+ * Supports both signatures:
+ *   deleteUserFromDevice(deviceIp, devicePort, username, password, userId)
+ *   deleteUserFromDevice({ device_ip, device_port, device_user, device_password }, userId)
  */
 async function deleteUserFromDevice(deviceIp, devicePort, username, password, userId) {
-  const cleanUserId = String(userId).trim();
+  let ip = deviceIp;
+  let port = devicePort || 80;
+  let userAuth = username || 'admin';
+  let pass = password || '';
+  let targetUid = userId;
+
+  if (typeof deviceIp === 'object' && deviceIp !== null) {
+    ip = deviceIp.device_ip || deviceIp.ip;
+    port = deviceIp.device_port || deviceIp.port || 80;
+    userAuth = deviceIp.device_user || deviceIp.username || 'admin';
+    pass = deviceIp.device_password || deviceIp.password || '';
+    targetUid = devicePort;
+  }
+
+  const cleanUserId = String(targetUid || '').trim();
   const diagnostics = [];
   let isSuccess = false;
+
+  if (!cleanUserId) {
+    return { success: false, diagnostics: ['ID de usuario vacío'], summary: 'ID no proporcionado' };
+  }
 
   // 1. Eliminar tarjeta vinculada
   try {
     console.log(`[Device API] Desvinculando tarjeta para ID "${cleanUserId}" en el MinMoe...`);
     await sendISAPIGenericRequest(
-      deviceIp,
-      devicePort,
-      username,
-      password,
+      ip,
+      port,
+      userAuth,
+      pass,
       'PUT',
       '/ISAPI/AccessControl/CardInfo/Delete?format=json',
       { 'Content-Type': 'application/json' },
@@ -674,10 +707,10 @@ async function deleteUserFromDevice(deviceIp, devicePort, username, password, us
     };
 
     let result = await sendISAPIGenericRequest(
-      deviceIp,
-      devicePort,
-      username,
-      password,
+      ip,
+      port,
+      userAuth,
+      pass,
       'PUT',
       '/ISAPI/AccessControl/UserInfo/Delete?format=json',
       { 'Content-Type': 'application/json' },
@@ -703,10 +736,10 @@ async function deleteUserFromDevice(deviceIp, devicePort, username, password, us
         }
       };
       result = await sendISAPIGenericRequest(
-        deviceIp,
-        devicePort,
-        username,
-        password,
+        ip,
+        port,
+        userAuth,
+        pass,
         'PUT',
         '/ISAPI/AccessControl/UserInfo/Delete?format=json',
         { 'Content-Type': 'application/json' },
@@ -726,10 +759,10 @@ async function deleteUserFromDevice(deviceIp, devicePort, username, password, us
     if (!isSuccess) {
       console.log(`[Device API] Reintentando borrado con DELETE UserInfo/Record...`);
       result = await sendISAPIGenericRequest(
-        deviceIp,
-        devicePort,
-        username,
-        password,
+        ip,
+        port,
+        userAuth,
+        pass,
         'DELETE',
         `/ISAPI/AccessControl/UserInfo/Record?format=json&employeeNo=${cleanUserId}`,
         { 'Content-Type': 'application/json' }

@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Users Form & Table Elements
   const btnShowAddUser = document.getElementById('btn-show-add-user');
   const btnSyncAcuaticApp = document.getElementById('btn-sync-acuaticapp');
+  const btnSyncAcuaticDirect = document.getElementById('btn-sync-acuatic-direct');
   const searchUserInput = document.getElementById('search-user-input');
   const btnClearSearch = document.getElementById('btn-clear-search');
   const userFormContainer = document.getElementById('user-form-container');
@@ -839,7 +840,86 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Envío del formulario de sincronización con credenciales manuales
+  // Función central para ejecutar la sincronización con AcuaticApp (directa o con credenciales personalizadas)
+  async function executeAcuaticAppSync(payload = {}) {
+    const originalDirectHtml = btnSyncAcuaticDirect ? btnSyncAcuaticDirect.innerHTML : '';
+    const originalSubmitHtml = btnSubmitSync ? btnSubmitSync.innerHTML : '';
+    const originalBtnHtml = btnSyncAcuaticApp ? btnSyncAcuaticApp.innerHTML : '';
+
+    if (btnSyncAcuaticDirect) {
+      btnSyncAcuaticDirect.disabled = true;
+      btnSyncAcuaticDirect.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:14px;height:14px;color:var(--accent);"></i> Sincronizando...`;
+    }
+    if (btnSyncAcuaticApp) {
+      btnSyncAcuaticApp.disabled = true;
+    }
+    if (btnSubmitSync) {
+      btnSubmitSync.disabled = true;
+      btnSubmitSync.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:13px;height:13px;"></i> Sincronizando...`;
+    }
+    if (window.lucide) window.lucide.createIcons();
+
+    const desc = payload.user ? `Usuario: "${payload.user}"` : 'Credenciales del sistema';
+    appendConsoleLog('info', `Iniciando sincronización manual con AcuaticApp (${desc}${payload.clear_first ? ', limpieza previa activada' : ''})...`);
+
+    try {
+      const res = await fetch('/api/users/sync-acuaticapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.status === 401) {
+        alert('Tu sesión en el panel del torniquete ha expirado. Inicia sesión nuevamente en el panel para continuar.');
+        window.location.href = '/login';
+        return;
+      }
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (payload.user) {
+          try {
+            localStorage.setItem('acuaticapp_sync_user', payload.user);
+            if (payload.baseUrl) localStorage.setItem('acuaticapp_sync_url', payload.baseUrl);
+          } catch (_) {}
+        }
+
+        appendConsoleLog('success', `[AcuaticApp OK] ${data.message}`);
+        alert(`[Sincronización Exitosa]\n${data.message}`);
+        closeSyncMenu();
+        refreshUsers();
+      } else {
+        throw new Error(data.error || 'Fallo en la sincronización');
+      }
+    } catch (err) {
+      appendConsoleLog('error', `[AcuaticApp Error] ${err.message}`);
+      alert(`Error al sincronizar con AcuaticApp:\n${err.message}`);
+    } finally {
+      if (btnSyncAcuaticDirect) {
+        btnSyncAcuaticDirect.disabled = false;
+        btnSyncAcuaticDirect.innerHTML = originalDirectHtml;
+      }
+      if (btnSyncAcuaticApp) {
+        btnSyncAcuaticApp.disabled = false;
+        btnSyncAcuaticApp.innerHTML = originalBtnHtml;
+      }
+      if (btnSubmitSync) {
+        btnSubmitSync.disabled = false;
+        btnSubmitSync.innerHTML = originalSubmitHtml;
+      }
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+
+  // Clic en el botón directo de sincronización manual
+  if (btnSyncAcuaticDirect) {
+    btnSyncAcuaticDirect.addEventListener('click', (e) => {
+      e.stopPropagation();
+      executeAcuaticAppSync({});
+    });
+  }
+
+  // Envío del formulario de sincronización con opciones / credenciales manuales
   if (syncAcuaticForm) {
     syncAcuaticForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -847,83 +927,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const userVal = syncAcuaticUserInput ? syncAcuaticUserInput.value.trim() : '';
       const passVal = syncAcuaticPasswordInput ? syncAcuaticPasswordInput.value.trim() : '';
       const urlVal = syncAcuaticUrlInput ? syncAcuaticUrlInput.value.trim() : '';
-
-      if (!userVal) {
-        alert('Por favor ingrese el usuario o escuela de AcuaticApp.');
-        if (syncAcuaticUserInput) syncAcuaticUserInput.focus();
-        return;
-      }
-
-      if (!passVal) {
-        alert('Por favor ingrese la contraseña de acceso de AcuaticApp.');
-        if (syncAcuaticPasswordInput) syncAcuaticPasswordInput.focus();
-        return;
-      }
-
-      const originalSubmitHtml = btnSubmitSync ? btnSubmitSync.innerHTML : '';
-      const originalBtnHtml = btnSyncAcuaticApp ? btnSyncAcuaticApp.innerHTML : '';
-
-      if (btnSubmitSync) {
-        btnSubmitSync.disabled = true;
-        btnSubmitSync.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width:13px;height:13px;"></i> Sincronizando...`;
-      }
-      if (btnSyncAcuaticApp) {
-        btnSyncAcuaticApp.disabled = true;
-      }
-      if (window.lucide) window.lucide.createIcons();
-
       const clearFirst = Boolean(document.getElementById('sync-acuatic-clear')?.checked);
 
-      appendConsoleLog('info', `Iniciando sincronización con AcuaticApp (Usuario: "${userVal}"${clearFirst ? ', limpieza previa activada' : ''})...`);
+      const payload = {
+        clear_first: clearFirst
+      };
+      if (userVal) payload.user = userVal;
+      if (passVal) payload.password = passVal;
+      if (urlVal) payload.baseUrl = urlVal;
 
-      try {
-        const res = await fetch('/api/users/sync-acuaticapp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user: userVal,
-            password: passVal,
-            baseUrl: urlVal || 'https://multihivesoft.com',
-            clear_first: clearFirst
-          })
-        });
-
-        if (res.status === 401) {
-          alert('Tu sesión en el panel del torniquete ha expirado. Inicia sesión nuevamente en el panel para continuar.');
-          window.location.href = '/login';
-          return;
-        }
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-          try {
-            localStorage.setItem('acuaticapp_sync_user', userVal);
-            if (urlVal && (urlVal.startsWith('http://') || urlVal.startsWith('https://'))) {
-              localStorage.setItem('acuaticapp_sync_url', urlVal);
-            }
-          } catch (_) {}
-
-          appendConsoleLog('success', `[AcuaticApp OK] ${data.message}`);
-          alert(`[Sincronización Exitosa]\n${data.message}`);
-          closeSyncMenu();
-          refreshUsers();
-        } else {
-          throw new Error(data.error || 'Fallo en la sincronización');
-        }
-      } catch (err) {
-        appendConsoleLog('error', `[AcuaticApp Error] ${err.message}`);
-        alert(`Error al sincronizar con AcuaticApp:\n${err.message}`);
-      } finally {
-        if (btnSubmitSync) {
-          btnSubmitSync.disabled = false;
-          btnSubmitSync.innerHTML = originalSubmitHtml;
-        }
-        if (btnSyncAcuaticApp) {
-          btnSyncAcuaticApp.disabled = false;
-          btnSyncAcuaticApp.innerHTML = originalBtnHtml;
-        }
-        if (window.lucide) window.lucide.createIcons();
-      }
+      executeAcuaticAppSync(payload);
     });
   }
 
