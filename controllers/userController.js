@@ -939,7 +939,12 @@ async function getUserQR(req, res) {
       return res.status(404).json({ error: 'Alumno no encontrado.' });
     }
 
-    const qrContent = user.attendance_token || String(user.user_id);
+    // Si el usuario tiene attendance_token, reducir el contenido del QR a solo los primeros 8 caracteres
+    let qrContent = String(user.user_id);
+    if (user.attendance_token && String(user.attendance_token).trim().length >= 8) {
+      qrContent = String(user.attendance_token).trim().substring(0, 8);
+    }
+
     const qrBuffer = await QRCode.toBuffer(qrContent, {
       type: 'png',
       width: 400,

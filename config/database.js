@@ -467,34 +467,55 @@ const getUserByPk = (id) => new Promise((res, rej) => {
 const getUserById = (userId) => new Promise((res, rej) => {
   if (!userId) return res(null);
   const cleanId = String(userId).trim();
-  
-  db.get("SELECT * FROM users WHERE user_id = ? OR matricula = ? OR id = ? OR acuaticapp_id = ? OR attendance_token = ?", [cleanId, cleanId, cleanId, cleanId, cleanId], async (err, row) => {
-    if (err) return rej(err);
-    if (row) {
-      const device_ids = await getUserDeviceIds(row.user_id).catch(() => []);
-      return res({ ...row, device_ids });
-    }
+  const lowerId = cleanId.toLowerCase();
 
-    // Fallback: Si el QR contiene el identificador o la URL
-    db.all("SELECT * FROM users", [], async (allErr, rows) => {
-      if (allErr) return rej(allErr);
-      const match = rows.find(u => 
-        cleanId === u.user_id || 
-        (u.matricula && cleanId === u.matricula) ||
-        (u.attendance_token && cleanId === u.attendance_token) ||
-        cleanId.includes(u.user_id) || 
-        (u.matricula && cleanId.includes(u.matricula)) ||
-        (u.attendance_token && cleanId.includes(u.attendance_token)) ||
-        (u.api_url && cleanId.includes(u.api_url)) ||
-        (u.api_url && u.api_url.includes(cleanId))
-      );
-      if (match) {
-        const device_ids = await getUserDeviceIds(match.user_id).catch(() => []);
-        return res({ ...match, device_ids });
+  // Búsqueda directa por user_id, matricula, id, acuaticapp_id, token completo o prefijo de 8 caracteres del token
+  db.get(
+    `SELECT * FROM users 
+     WHERE user_id = ? 
+        OR matricula = ? 
+        OR id = ? 
+        OR acuaticapp_id = ? 
+        OR attendance_token = ?
+        OR (attendance_token IS NOT NULL AND LOWER(SUBSTR(attendance_token, 1, 8)) = ?)
+     LIMIT 1`,
+    [cleanId, cleanId, cleanId, cleanId, cleanId, lowerId],
+    async (err, row) => {
+      if (err) return rej(err);
+      if (row) {
+        const device_ids = await getUserDeviceIds(row.user_id).catch(() => []);
+        return res({ ...row, device_ids });
       }
-      res(null);
-    });
-  });
+
+      // Fallback para escaneos con URLs o cadenas compuestas
+      db.all("SELECT * FROM users", [], async (allErr, rows) => {
+        if (allErr) return rej(allErr);
+        const match = rows.find(u => {
+          const uToken = u.attendance_token ? String(u.attendance_token).trim().toLowerCase() : null;
+          const tokenPrefix = uToken && uToken.length >= 8 ? uToken.substring(0, 8) : null;
+
+          return (
+            cleanId === u.user_id || 
+            (u.matricula && cleanId === u.matricula) ||
+            (uToken && lowerId === uToken) ||
+            (tokenPrefix && lowerId === tokenPrefix) ||
+            cleanId.includes(u.user_id) || 
+            (u.matricula && cleanId.includes(u.matricula)) ||
+            (uToken && (cleanId.includes(u.attendance_token) || lowerId.includes(uToken))) ||
+            (tokenPrefix && (cleanId.includes(tokenPrefix) || lowerId.includes(tokenPrefix))) ||
+            (u.api_url && cleanId.includes(u.api_url)) ||
+            (u.api_url && u.api_url.includes(cleanId))
+          );
+        });
+
+        if (match) {
+          const device_ids = await getUserDeviceIds(match.user_id).catch(() => []);
+          return res({ ...match, device_ids });
+        }
+        res(null);
+      });
+    }
+  );
 });
 
 const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => new Promise(async (res, rej) => {
