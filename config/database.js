@@ -368,23 +368,16 @@ const isUserAllowedOnDevice = (userId, deviceId) => new Promise((res, rej) => {
     return res(true);
   }
 
+  // Validación estricta: comprobar si el usuario tiene asignado explícitamente este torniquete
   db.get(
     "SELECT id FROM user_devices WHERE user_id = ? AND device_id = ? LIMIT 1",
     [cleanUid, Number(deviceId)],
     (err, row) => {
       if (err) return rej(err);
-      // Si el usuario tiene asignación explícita a este torniquete
       if (row) return res(true);
 
-      // Si no tiene registros en user_devices, permitir por defecto si solo hay 1 dispositivo o fallback
-      db.all("SELECT device_id FROM user_devices WHERE user_id = ?", [cleanUid], (err2, rows) => {
-        if (err2) return rej(err2);
-        if (!rows || rows.length === 0) {
-          // Si no tiene asignación guardada, permitir en el dispositivo por defecto
-          return res(true);
-        }
-        res(false);
-      });
+      // Si no existe vinculación para este torniquete, DENEGAR rotundamente
+      return res(false);
     }
   );
 });

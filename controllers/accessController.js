@@ -554,10 +554,11 @@ async function executeAccessValidation(reqInfo, clientIp, device = null) {
   const isAllowedOnDevice = await dbHelper.isUserAllowedOnDevice(user.user_id, deviceId);
   if (!isAllowedOnDevice) {
     const denyMsg = `No autorizado para ${deviceName}`;
-    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El usuario "${user.name}" (${user.user_id}) no está asignado a este torniquete.`, deviceId, deviceName);
+    logEvent('warning', `[${deviceName}] ACCESO DENEGADO: El usuario "${user.name}" (${user.user_id}) NO tiene permitido el acceso por este torniquete.`, deviceId, deviceName);
     await dbHelper.addLog(userId, user.name, eventType, user.api_url, { error: denyMsg }, false, false, deviceId, deviceName, deviceIp);
     broadcastFeedback(false, user.name, userId, denyMsg, deviceId, deviceName);
 
+    // Enviar veredicto negativo (false) al hardware físico para no abrir y mostrar rechazo en pantalla
     if (serialNo && device && device.ip && device.username && device.password) {
       deviceHelper.sendRemoteCheck(
         device.ip,

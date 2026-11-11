@@ -37,7 +37,6 @@ El software está altamente optimizado y no requiere servidores de gama alta. Pu
 * **Microcomputadoras:**
   * Compatible con Raspberry Pi 4 (de 2 GB o 4 GB de RAM) corriendo Linux, ideal para operación continua 24/7 con bajo consumo eléctrico.
 
----
 
 ### C. Requisitos de la API Externa de Asistencia (Sistemas Escolares)
 
@@ -61,8 +60,6 @@ La API externa del portal escolar institucional es la que dictamina si se autori
   * En la misma computadora del servidor: `http://localhost:3000/feedback.html`
   * Desde otra pantalla/dispositivo en la red: `http://<IP_DEL_SERVIDOR>:3000/feedback.html`
 * **Audio Activo:** Es indispensable habilitar el audio en el navegador para que el alumno y el personal de prefectura escuchen los timbres acústicos distintivos (*Tono agudo = Acceso permitido*, *Tono grave = Acceso denegado*).
-
-<div style="page-break-after: always;"></div>
 
 <div style="page-break-after: always;"></div>
 
@@ -119,24 +116,30 @@ Desde la tabla central de **Alumnos Registrados**, el personal puede gestionar e
 * **Campo API URL Relacionada:**
   * Si cuenta con una URL de validación externa personalizada, péguela en el campo correspondiente.
   * Si se deja en blanco, el sistema le asignará automáticamente validación interna garantizada (`allow`), otorgando acceso permanente.
+<div id="seccion-sincronizar-minmoe"></div>
+
 * **Botón "Registrar en dispositivos MinMoe" (Enrolamiento Directo al Hardware):**
   * En la ventana de edición de datos del alumno, dispone del botón azul **"Registrar en dispositivos MinMoe"**.
   * Al presionarlo, el sistema toma la matrícula y nombre del alumno y los graba de forma instantánea vía ISAPI únicamente en los torniquetes que tenga marcados en **Torniquetes Permitidos**.
   * Ideal para enrolar o actualizar a un alumno específico en el hardware sin tener que ejecutar una sincronización masiva general.
 
+---
+
 #### 2. Estados del Alumno (Activo, Con Token, Sin Token y Archivado):
 Para mantener la integridad de los registros de asistencia sin borrar historiales:
-* **Filtros en Tabla:** Puede filtrar rápidamente entre:
+**Filtros en Tabla:** Puede filtrar rápidamente entre:
   * *"Alumnos Activos"*: Todo el padrón con acceso vigente.
   * *"Con Token de Acceso"*: Alumnos que ya cuentan con su token institucional de AcuaticApp.
   * *"Sin Token de Acceso"*: Alumnos registrados localmente o que requieren asignación de credencial.
   * *"Alumnos Archivados"*: Alumnos con acceso suspendido temporalmente.
   * *"Todos los Alumnos"*: Padrón completo sin exclusiones.
-* **Archivar Alumno (Acción Temporal):**
-  * Al hacer clic en el botón amarillo **Archivar** (`📁`), el alumno conserva su perfil e historial en la base de datos, pero **se le revoca el acceso físico en los torniquetes** (su tarjeta se retira del MinMoe y cualquier intento marcará *"Acceso Denegado / Alumno Archivado"*).
+
+**Archivar Alumno (Acción Temporal):**
+  * Al hacer clic en el botón amarillo **Archivar**, el alumno conserva su perfil e historial en la base de datos, pero **se le revoca el acceso físico en los torniquetes** (su tarjeta se retira del MinMoe y cualquier intento marcará *"Acceso Denegado / Alumno Archivado"*).
   * Puede reactivarse en cualquier momento con un clic en **Desarchivar**.
-* **Eliminar Alumno (*Soft-Delete* de Seguridad):**
-  * Al presionar el botón rojo **Eliminar** (`🗑️`), el sistema retira al alumno del hardware MinMoe y lo oculta de la interfaz web, pero **preserva sus registros históricos de auditoría** en la base de datos.
+
+**Eliminar Alumno (*Soft-Delete* de Seguridad):**
+  * Al presionar el botón rojo **Eliminar**, el sistema retira al alumno del hardware MinMoe y lo oculta de la interfaz web, pero **preserva sus registros históricos de auditoría** en la base de datos.
 
 !!! Info 3. Búsqueda Rápida en Tiempo Real:
     Escriba en la barra de búsqueda para filtrar instantáneamente por Nombre, Matrícula, Teléfono o ID de AcuaticApp.
@@ -170,7 +173,7 @@ Si necesita reflejar altas inmediatas de alumnos antes del ciclo diario automát
 Para habilitar el acceso biométrico (reconocimiento facial o huella dactilar) a un alumno:
 
 #### Paso 1: Alta previa en el Panel Web
-Registre al alumno en el panel web (`http://localhost:3000`) o sincronícelo desde AcuaticApp. El sistema creará el registro y grabará automáticamente su **Nombre** e **ID de Usuario** en la memoria del MinMoe.
+Registre al alumno en el panel web (`http://localhost:3000`), sincronícelo desde AcuaticApp o utilice el botón [**"Registrar en dispositivos MinMoe"**](#seccion-sincronizar-minmoe). El sistema creará el registro y grabará automáticamente su **Nombre** e **ID de Usuario** en la memoria del MinMoe para que el dispositivo ya reconozca al alumno antes de asociarle su biometría facial.
 
 #### Paso 2: Captura Biométrica en el Dispositivo
 * **Método 1: Enrolamiento directo en la pantalla del lector MinMoe (Recomendado):**
@@ -208,7 +211,7 @@ En caso de requerir la apertura inmediata de un torniquete:
 * Toda la información del padrón de alumnos, torniquetes, recepcionistas e historial de accesos se almacena en el archivo **`database.sqlite`** en la raíz de la aplicación.
 * **Recomendación:** Copiar semanalmente este archivo a una memoria USB o almacenamiento seguro en la nube. Ante cualquier eventualidad o reemplazo de computadora, basta con restaurar este archivo para reactivar el sistema en 5 minutos.
 
----
+<div style="page-break-after: always;"></div>
 
 ### B. Modo de Contingencia y Alumnos sin URL (Acceso Siempre Permitido)
 
@@ -240,7 +243,7 @@ Si una tarjeta de torniquete aparece desconectada o no responde a los comandos d
    * Verificar que no exista conflicto de IP duplicada con otro equipo o switch.
 3. **Re-sincronizar el Alumno:** Si el torniquete sí responde a la apertura manual pero no reconoce a un alumno específico, abra el alumno en el panel y presione **"Registrar en dispositivos MinMoe"**.
 
----
+<div style="page-break-after: always;"></div>
 
 ### E. Cambio de Contraseña Administrativa
 
