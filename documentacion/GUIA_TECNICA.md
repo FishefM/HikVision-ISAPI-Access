@@ -204,13 +204,15 @@ flowchart TD
 
 ---
 
-## 5. Integración con AcuaticApp (API v2)
+## 5. Integración con AcuaticApp (API v2 Multihivesoft)
 
-La sincronización masiva interactúa con la API REST institucional:
-1. **Autenticación:** `POST https://acuaticapp.com/api/v2/administration/login` con credenciales de escuela para obtener el `Bearer Token`.
-2. **Paginación:** `GET https://acuaticapp.com/api/v2/administration/student/getStudents?page=X&per_page=50`.
-3. **Mapeo de Campos:** Extrae `id`, `name`, `second_name`, `last_name`, `matricula`, `phone` e `image_file`.
-4. **Reactivación Automática:** Si un alumno estaba marcado con `is_deleted = 1` o `is_archived = 1` pero viene activo en la respuesta de la escuela, el método `addUser` en [`config/database.js`](file:///home/yucef_U/Chamba/Torniquete/config/database.js) restablece automáticamente `is_deleted = 0` e `is_archived = 0`.
+La sincronización interactúa con la API REST institucional:
+1. **Autenticación:** `POST https://multihivesoft.com/api/school/login` con credenciales escolares (`ACUATICAPP_USER` y `ACUATICAPP_PASSWORD`) para obtener el Bearer Token de sesión.
+2. **Paginación:** `GET https://multihivesoft.com/api/v2/administration/student/getStudents?page=X&per_page=50`.
+3. **Mapeo de Campos y Attendance Token:** Extrae `id`, `name`, `second_name`, `last_name`, `matricula`, `phone`, `image_file` y `attendance_token`. Si el alumno posee token, se asigna su URL de verificación directa (`/api/attendance/scan/:token`).
+4. **Ciclo Automático cada 24 Horas:** Función `initAcuaticAppAutoSync()` iniciada en el arranque de `server.js` que ejecuta periódicamente la importación de alumnos nuevos y actualización de tokens en segundo plano.
+5. **Resiliencia de Red y Reintentos:** Módulo `fetchWithRetry` implementado con `axios`, forzado de IPv4 (`family: 4`), resolución DNS rápida en memoria con servidores públicos (1.1.1.1, 8.8.8.8) y hasta 3 reintentos automáticos ante timeouts o errores transitorios.
+6. **Reactivación Automática:** Si un alumno estaba marcado con `is_deleted = 1` o `is_archived = 1` pero viene activo en la respuesta de la escuela, el método `addUser` en [`config/database.js`](file:///home/yucef_U/Chamba/Torniquete/config/database.js) restablece automáticamente `is_deleted = 0` e `is_archived = 0`.
 
 ---
 
@@ -228,13 +230,14 @@ La sincronización masiva interactúa con la API REST institucional:
 * `DELETE /api/receptionists/:id`: Elimina un recepcionista.
 
 ### Gestión de Alumnos
-* `GET /api/users`: Lista de alumnos (soporta filtros `?device=`, `?status=active|archived|all` y búsqueda `?search=`). Incluye cabeceras anti-caché `Cache-Control: no-store`.
+* `GET /api/users`: Lista de alumnos (soporta filtros `?device=`, `?status=active|with_token|without_token|archived|all` y búsqueda `?search=`). Incluye cabeceras anti-caché `Cache-Control: no-store`.
 * `GET /api/users/:id/qr`: Genera la imagen PNG del código QR del alumno.
 * `POST /api/users`: Registra un alumno y lo sincroniza con los torniquetes asignados.
 * `PUT /api/users/:id`: Actualiza datos, matrícula y torniquetes.
 * `DELETE /api/users/:id`: Eliminación lógica (*Soft-Delete*).
 * `POST /api/users/:id/archive`: Alterna entre estado archivado y desarchivado.
 * `POST /api/users/sync-all`: Sincroniza todo el padrón local hacia el MinMoe predeterminado.
+* `POST /api/users/:id/sync-device`: Sincroniza de forma individual un alumno hacia los torniquetes seleccionados.
 * `POST /api/users/sync-acuaticapp`: Dispara la sincronización masiva desde AcuaticApp.
 
 ### Torniquetes / MinMoe

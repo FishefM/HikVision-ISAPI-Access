@@ -113,35 +113,55 @@ Desde la tabla central de **Alumnos Registrados**, el personal puede gestionar e
 
 #### 1. Alta y Edición de Alumnos:
 * Ingrese el Nombre Completo (o Nombres y Apellidos por separado), Matrícula y Teléfono.
-* **Asignación de Torniquetes:** Marque las casillas de los torniquetes por los cuales el alumno tiene permitido el paso (o marque *Asignar a todos los torniquetes*).
+* **Attendance Token (Token de Acceso Multihivesoft / AcuaticApp):**
+  * Al ingresar o sincronizar el token del alumno (clave única alfanumérica de 64 caracteres), el sistema auto-completa la **API URL de Verificación** apuntando a `https://multihivesoft.com/api/attendance/scan/<token>`.
+* **Asignación de Torniquetes:** Marque las casillas de los torniquetes por los cuales el alumno tiene permitido el paso (o marque *Seleccionar todos*).
 * **Campo API URL Relacionada:**
-  * Si cuenta con una URL de validación externa (ej. enlace de asistencia escolar o AcuaticApp), péguela en el campo correspondiente.
+  * Si cuenta con una URL de validación externa personalizada, péguela en el campo correspondiente.
   * Si se deja en blanco, el sistema le asignará automáticamente validación interna garantizada (`allow`), otorgando acceso permanente.
+* **Botón "Registrar en dispositivos MinMoe" (Enrolamiento Directo al Hardware):**
+  * En la ventana de edición de datos del alumno, dispone del botón azul **"Registrar en dispositivos MinMoe"**.
+  * Al presionarlo, el sistema toma la matrícula y nombre del alumno y los graba de forma instantánea vía ISAPI únicamente en los torniquetes que tenga marcados en **Torniquetes Permitidos**.
+  * Ideal para enrolar o actualizar a un alumno específico en el hardware sin tener que ejecutar una sincronización masiva general.
 
-#### 2. Estados del Alumno (Activo, Archivado y Eliminado):
+#### 2. Estados del Alumno (Activo, Con Token, Sin Token y Archivado):
 Para mantener la integridad de los registros de asistencia sin borrar historiales:
+* **Filtros en Tabla:** Puede filtrar rápidamente entre:
+  * *"Alumnos Activos"*: Todo el padrón con acceso vigente.
+  * *"Con Token de Acceso"*: Alumnos que ya cuentan con su token institucional de AcuaticApp.
+  * *"Sin Token de Acceso"*: Alumnos registrados localmente o que requieren asignación de credencial.
+  * *"Alumnos Archivados"*: Alumnos con acceso suspendido temporalmente.
+  * *"Todos los Alumnos"*: Padrón completo sin exclusiones.
 * **Archivar Alumno (Acción Temporal):**
   * Al hacer clic en el botón amarillo **Archivar** (`📁`), el alumno conserva su perfil e historial en la base de datos, pero **se le revoca el acceso físico en los torniquetes** (su tarjeta se retira del MinMoe y cualquier intento marcará *"Acceso Denegado / Alumno Archivado"*).
   * Puede reactivarse en cualquier momento con un clic en **Desarchivar**.
 * **Eliminar Alumno (*Soft-Delete* de Seguridad):**
   * Al presionar el botón rojo **Eliminar** (`🗑️`), el sistema retira al alumno del hardware MinMoe y lo oculta de la interfaz web, pero **preserva sus registros históricos de auditoría** en la base de datos.
-* **Filtros en Tabla:** Puede filtrar la lista entre *"Alumnos Activos"*, *"Archivados"* o *"Todos"*, así como filtrar por torniquete asignado.
 
 !!! Info 3. Búsqueda Rápida en Tiempo Real:
     Escriba en la barra de búsqueda para filtrar instantáneamente por Nombre, Matrícula, Teléfono o ID de AcuaticApp.
 
 ---
 
-### D. Sincronización Automática con AcuaticApp
+### D. Sincronización Automática con AcuaticApp (API v2 Multihivesoft)
 
-Si la institución utiliza **AcuaticApp**:
+El sistema cuenta con un motor de integración bidireccional diseñado para mantener sincronizados los registros del torniquete con la plataforma institucional escolar:
+
+#### 1. Sincronización Automática en Segundo Plano (Cada 24 Horas):
+* **Completamente Autónoma:** El servidor ejecuta una tarea interna programada que se dispara **cada 24 horas**.
+* **Detección Continua de Alumnos Nuevos:** Consulta la API de producción (`https://multihivesoft.com`), detecta alumnos recién inscritos y los da de alta automáticamente en la base de datos local SQLite y en los torniquetes.
+* **Actualización No Destructiva:** No borra ni altera el historial de los alumnos existentes; únicamente actualiza tokens de asistencia o cambios de nombre.
+* **Mecanismo de Resiliencia (Reintentos y Fallback de Red):**
+  * Ante lentitud de red o saturación temporal en la nube, el sistema ejecuta hasta **3 reintentos automáticos** de 20 segundos con pausas progresivas.
+  * Forzado de IPv4 y caché de DNS público para evitar interrupciones por resolución de nombres.
+* **Reactivación Automática:** Si un alumno fue previamente archivado o marcado como inactivo localmente pero continúa matriculado en AcuaticApp, el ciclo automático lo reactiva con acceso vigente.
+
+#### 2. Sincronización Manual Inmediata desde el Panel Web:
+Si necesita reflejar altas inmediatas de alumnos antes del ciclo diario automático:
 1. En el panel principal, presione el botón **"Sincronizar AcuaticApp"**.
-2. Si es necesario, verifique sus credenciales de escuela (usuario y contraseña de la plataforma AcuaticApp).
-3. Presione **"Iniciar Sincronización"**. El sistema se conectará a la API institucional, descargará todos los alumnos activos paginados y los dará de alta en SQLite y en los torniquetes.
-4. **Reactivación Automática:** Si un alumno fue previamente eliminado o archivado en el sistema local pero continúa activo en AcuaticApp, la sincronización lo reactivará automáticamente con acceso autorizado.
-
-!!! Warning Aviso
-    Esta opción fué implementada con una API de prueba brindada por AcuaticApp.
+2. Se desplegará el menú de credenciales. Las credenciales de producción (`ACUATICAPP_USER`, `ACUATICAPP_PASSWORD` y `ACUATICAPP_BASE_URL`) se toman directamente de su archivo de configuración `.env`.
+3. *(Opcional)* Si desea realizar un reemplazo integral desde cero, marque la casilla **"Limpiar alumnos previos antes de sincronizar"** (la limpieza local se ejecuta únicamente después de haber descargado exitosamente todo el catálogo en memoria, protegiendo sus datos ante cualquier fallo de red).
+4. Presione **"Sincronizar"**. El progreso se muestra en tiempo real en la consola inferior con el número exacto de alumnos procesados, nuevos y actualizados.
 
 ---
 
@@ -199,7 +219,30 @@ En caso de requerir la apertura inmediata de un torniquete:
 
 ---
 
-### C. Cambio de Contraseña Administrativa
+### C. Diagnóstico de Acceso: Alumnos Fuera de Horario vs. Acceso Concedido
+
+Para evitar confusiones en recepción respecto a por qué el torniquete no abre a un alumno registrado:
+
+| Respuesta en Pantalla / Log | Causa Operativa | Acción del Personal de Recepción |
+| :--- | :--- | :--- |
+| **`Acceso correcto` (HTTP 200)** | El alumno tiene horario y clase activa en ese momento y está al corriente. | El torniquete abre de inmediato y se reproduce el tono acústico verde de éxito en la pantalla de feedback. |
+| **`Fuera de horario o alumno sin grupo` (HTTP 404)** | El alumno está debidamente registrado en AcuaticApp y cuenta con token válido, pero **no tiene clase asignada en el bloque horario actual**. | El sistema deniega el paso por política de horario de la escuela. La recepcionista puede verificar su horario en AcuaticApp o autorizar una apertura manual de cortesía si corresponde. |
+| **`Token inválido o alumno no encontrado` (HTTP 404)** | El alumno no tiene token o fue dado de baja en la plataforma escolar. | Realizar una sincronización con AcuaticApp para actualizar su token o verificar su estatus administrativo. |
+
+---
+
+### D. Lista de Chequeo Rápida ante Pérdida de Conexión de un Torniquete
+
+Si una tarjeta de torniquete aparece desconectada o no responde a los comandos de apertura:
+1. **Comprobar Alimentación:** Verificar que el lector MinMoe tenga encendida la pantalla y los LEDs indicadores de red traseros.
+2. **Ping ISAPI desde el Panel:** Presione el botón **"Probar Conexión"** en la tarjeta del torniquete. Si responde con error:
+   * Verificar que la laptop/servidor y el MinMoe estén en el mismo segmento de red local (ej. `192.168.100.x`).
+   * Verificar que no exista conflicto de IP duplicada con otro equipo o switch.
+3. **Re-sincronizar el Alumno:** Si el torniquete sí responde a la apertura manual pero no reconoce a un alumno específico, abra el alumno en el panel y presione **"Registrar en dispositivos MinMoe"**.
+
+---
+
+### E. Cambio de Contraseña Administrativa
 
 !!! danger Seguridad del Sistema
     El sistema se entrega configurado con la contraseña de administrador predeterminada **`admin123`**. Se recomienda enfáticamente reemplazarla por una clave institucional segura para evitar accesos no autorizados a la configuración y al padrón de alumnos.
