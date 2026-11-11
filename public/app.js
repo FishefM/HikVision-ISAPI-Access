@@ -2209,7 +2209,7 @@ document.addEventListener('DOMContentLoaded', () => {
       qrModalImage.src = currentQrUrl;
     } catch (err) {
       console.warn('[QR] Error al generar credencial personalizada:', err);
-      currentQrUrl = `/api/users/${user.id}/qr`;
+      currentQrUrl = `/api/users/${user.id}/qr?t=${Date.now()}`;
       qrModalImage.src = currentQrUrl;
     }
 
