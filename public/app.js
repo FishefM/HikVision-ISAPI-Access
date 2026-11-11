@@ -2068,7 +2068,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function generateCredentialCardBlob(user) {
     const qrImg = new Image();
     qrImg.crossOrigin = 'anonymous';
-    const qrSource = `/api/users/${user.id}/qr`;
+    const qrSource = `/api/users/${user.id}/qr?t=${Date.now()}`;
 
     await new Promise((resolve, reject) => {
       qrImg.onload = () => resolve();

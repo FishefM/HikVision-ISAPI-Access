@@ -637,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
     qrModalImage.alt = `Cargando credencial para ${user.name}...`;
 
     try {
-      const res = await fetch(`${API_USERS}/${user.id}/qr`);
+      const res = await fetch(`${API_USERS}/${user.id}/qr?t=${Date.now()}`);
       if (res.ok) {
         const blob = await res.blob();
         currentActiveQrBlob = blob;

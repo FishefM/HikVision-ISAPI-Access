@@ -959,7 +959,9 @@ async function getUserQR(req, res) {
     const safeName = user.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `inline; filename="qr_${safeName}_${user.user_id}.png"`);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     return res.send(qrBuffer);
   } catch (err) {
     logEvent('error', `[QR ERROR] Error al generar código QR: ${err.message}`);
