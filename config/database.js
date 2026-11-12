@@ -560,7 +560,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
   const lookupAttendanceToken = attendanceToken ? String(attendanceToken).trim() : '___NULL___';
 
   db.get(
-    "SELECT id, user_id FROM users WHERE user_id = ? OR (matricula IS NOT NULL AND matricula = ?) OR (acuaticapp_id IS NOT NULL AND acuaticapp_id = ?) OR (attendance_token IS NOT NULL AND attendance_token = ?) LIMIT 1",
+    "SELECT id, user_id, attendance_token FROM users WHERE user_id = ? OR (matricula IS NOT NULL AND matricula = ?) OR (acuaticapp_id IS NOT NULL AND acuaticapp_id = ?) OR (attendance_token IS NOT NULL AND attendance_token = ?) LIMIT 1",
     [lookupUserId, lookupMatricula, lookupAcuaticId, lookupAttendanceToken],
     async (err, existing) => {
       if (err) return rej(err);
@@ -568,6 +568,10 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
       if (existing) {
         // Actualizar usuario existente sin duplicar
         try {
+          const oldToken = existing.attendance_token ? String(existing.attendance_token).trim() : '';
+          const currentToken = attendanceToken ? String(attendanceToken).trim() : '';
+          const tokenChanged = Boolean(currentToken && currentToken !== oldToken);
+
           // Preservar la asignación de torniquetes existente si ya está configurada
           let targetDevicesToUpdate = targetDeviceIds;
           if (userData.preserve_devices !== false) {
@@ -606,6 +610,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             image_file: imageFile,
             acuaticapp_id: acuaticappId,
             attendance_token: attendanceToken,
+            token_changed: tokenChanged,
             is_updated: true
           });
         } catch (updErr) {

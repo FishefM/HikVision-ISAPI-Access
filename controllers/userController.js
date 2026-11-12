@@ -614,6 +614,7 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
   let updatedCount = 0;
   const allDevices = await dbHelper.getDevices();
   const availableDeviceIds = allDevices.filter(d => d.is_active !== 0).map(d => d.id);
+  const usersToSyncToHardware = [];
 
   for (const st of extractedStudents) {
     const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
@@ -644,6 +645,10 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
 
       if (userResult.is_created) {
         createdCount++;
+        usersToSyncToHardware.push(userResult);
+      } else if (userResult.token_changed) {
+        updatedCount++;
+        usersToSyncToHardware.push(userResult);
       } else {
         updatedCount++;
       }
@@ -653,17 +658,98 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
     }
   }
 
-  const summary = `Sincronización completada: ${totalProcessed} alumnos procesados (${createdCount} nuevos, ${updatedCount} actualizados).`;
+  const summary = `Sincronización completada: ${totalProcessed} alumnos procesados (${createdCount} nuevos, ${updatedCount} actualizados, ${usersToSyncToHardware.length} pendientes de hardware).`;
   logEvent('success', `=== ${summary.toUpperCase()} ===`);
+
+  // Disparar en segundo plano el registro controlado en los torniquetes únicamente para alumnos nuevos o con token cambiado
+  if (usersToSyncToHardware.length > 0) {
+    logEvent('info', `[Auto-Sync MinMoe] Se detectaron ${usersToSyncToHardware.length} alumnos nuevos o con token actualizado. Iniciando registro controlado en los torniquetes...`);
+    syncBatchToDevicesControlled(usersToSyncToHardware).catch(err => {
+      logEvent('warning', `[Auto-Sync MinMoe] Advertencia en sincronización en segundo plano: ${err.message}`);
+    });
+  } else {
+    logEvent('info', '[Auto-Sync MinMoe] No se detectaron alumnos nuevos ni cambios en tokens. No es necesario saturar los torniquetes.');
+  }
 
   return {
     success: true,
     total: totalProcessed,
     created: createdCount,
     updated: updatedCount,
+    syncedToHardware: usersToSyncToHardware.length,
     school: schoolInfo,
     message: summary
   };
+}
+
+/**
+ * Sincroniza de forma controlada y en segundo plano una lista específica de alumnos
+ * (nuevos o con token actualizado) hacia sus torniquetes asignados.
+ */
+async function syncBatchToDevicesControlled(usersList) {
+  if (!usersList || usersList.length === 0) return;
+
+  try {
+    const allDevices = await dbHelper.getDevices();
+    const activeDevices = allDevices.filter(d => d.is_active !== 0 && d.ip && d.username && d.password);
+
+    if (activeDevices.length === 0) {
+      logEvent('info', '[Auto-Sync MinMoe] No hay torniquetes activos configurados para sincronizar.');
+      return;
+    }
+
+    const syncDelay = parseInt(process.env.HIKVISION_SYNC_DELAY_MS, 10) || 300;
+    let syncedTotal = 0;
+
+    for (const dev of activeDevices) {
+      // Verificar conectividad con el torniquete antes de procesar para no bloquearse
+      const conn = await deviceHelper.checkDeviceConnection(dev.ip, dev.port || 80, dev.username, dev.password).catch(() => ({ success: false }));
+      if (!conn.success) {
+        logEvent('warning', `[Auto-Sync MinMoe] Torniquete "${dev.name}" (${dev.ip}) no disponible. Se omite para este lote.`);
+        continue;
+      }
+
+      for (let i = 0; i < usersList.length; i++) {
+        const u = usersList[i];
+        
+        // Comprobar si el alumno tiene asignado este dispositivo
+        const userDeviceIds = await dbHelper.getUserDeviceIds(u.user_id).catch(() => []);
+        if (userDeviceIds.length > 0 && !userDeviceIds.includes(dev.id)) {
+          continue; // No asignado a este torniquete
+        }
+
+        try {
+          const syncRes = await deviceHelper.syncFullUserToDevice({
+            device_ip: dev.ip,
+            device_port: dev.port || 80,
+            device_user: dev.username,
+            device_password: dev.password
+          }, u);
+
+          if (syncRes.synced) {
+            syncedTotal++;
+            logEvent('success', `[Auto-Sync MinMoe - ${dev.name}] Alumno "${u.name}" (${u.user_id}) registrado correctamente.`);
+          } else {
+            logEvent('warning', `[Auto-Sync MinMoe - ${dev.name}] Alumno "${u.name}": ${syncRes.summary || 'Aviso en sincronización'}`);
+          }
+        } catch (callErr) {
+          logEvent('warning', `[Auto-Sync MinMoe - ${dev.name}] Error sincronizando "${u.name}": ${callErr.message}`);
+        }
+
+        // Pausa entre alumnos para no saturar el CPU del lector
+        if (i < usersList.length - 1) {
+          await new Promise(r => setTimeout(r, syncDelay));
+          if ((i + 1) % 25 === 0) {
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+      }
+    }
+
+    logEvent('info', `[Auto-Sync MinMoe] Sincronización automática en torniquetes completada: ${syncedTotal} registros exitosos.`);
+  } catch (err) {
+    logEvent('error', `[Auto-Sync MinMoe ERROR] Error durante la sincronización automática: ${err.message}`);
+  }
 }
 
 /**
