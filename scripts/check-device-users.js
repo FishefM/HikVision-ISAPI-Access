@@ -10,29 +10,29 @@ const dbHelper = require('../config/database');
 const deviceHelper = require('../utils/device');
 
 async function checkDeviceUsers() {
-  console.log('\n╔══════════════════════════════════════════════════════════════════════════════════╗');
-  console.log('║            CONSULTA DE USUARIOS Y TARJETAS EN MEMORIA MINMOE                    ║');
-  console.log('╚══════════════════════════════════════════════════════════════════════════════════╝\n');
+  console.log('\n==================================================================================');
+  console.log('             CONSULTA DE USUARIOS Y TARJETAS EN MEMORIA MINMOE                    ');
+  console.log('==================================================================================\n');
 
   const allDevices = await dbHelper.getDevices();
   const activeDevices = allDevices.filter(d => d.is_active !== 0 && d.ip && d.username && d.password);
 
   if (activeDevices.length === 0) {
-    console.error('❌ No hay torniquetes activos configurados.');
+    console.error('[ERROR] No hay torniquetes activos configurados.');
     process.exit(1);
   }
 
   for (const dev of activeDevices) {
-    console.log(`──────────────────────────────────────────────────────────────────────────────────`);
-    console.log(`▶ Dispositivo: ${dev.name} (${dev.ip}:${dev.port || 80})`);
+    console.log(`----------------------------------------------------------------------------------`);
+    console.log(`* Dispositivo: ${dev.name} (${dev.ip}:${dev.port || 80})`);
 
     // 1. Verificar conexión
     const conn = await deviceHelper.checkDeviceConnection(dev.ip, dev.port || 80, dev.username, dev.password).catch(e => ({ success: false, error: e.message }));
     if (!conn.success) {
-      console.log(`   ✗ Estado: Sin conexión o no responde (${conn.error || 'Timeout'}).\n`);
+      console.log(`   [ERROR] Estado: Sin conexion o no responde (${conn.error || 'Timeout'}).\n`);
       continue;
     }
-    console.log(`   ✓ Estado: En línea y autenticado`);
+    console.log(`   [OK] Estado: En linea y autenticado`);
 
     let userCount = null;
     let cardCount = null;
@@ -104,11 +104,11 @@ async function checkDeviceUsers() {
       }
     } catch (_) {}
 
-    console.log(`   👥 Total de personas en memoria : ${userCount !== null ? userCount : 'No reportado por firmware'}`);
-    console.log(`   💳 Total de tarjetas vinculadas : ${cardCount !== null ? cardCount : 'No reportado por firmware'}`);
+    console.log(`   * Total de personas en memoria : ${userCount !== null ? userCount : 'No reportado por firmware'}`);
+    console.log(`   * Total de tarjetas vinculadas : ${cardCount !== null ? cardCount : 'No reportado por firmware'}`);
 
     if (userCount !== null && userCount > 20) {
-      console.log(`   ℹ️  Nota: En la interfaz web de Hikvision solo se ven 20 por página (página 1 de ${Math.ceil(userCount / 20)}).`);
+      console.log(`   [INFO] Nota: En la interfaz web de Hikvision solo se ven 20 por pagina (pagina 1 de ${Math.ceil(userCount / 20)}).`);
     }
     console.log();
   }

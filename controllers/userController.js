@@ -88,22 +88,24 @@ function extractIdFromApiUrl(apiUrl) {
 }
 
 /**
- * Determina si un registro corresponde a un usuario de pruebas o a un alumno real
+ * Determina si un registro corresponde a un usuario de pruebas o a un alumno real.
+ * Los alumnos importados de AcuaticApp (con acuaticapp_id) nunca se consideran de prueba.
  */
 function isTestUser(user) {
   if (!user) return false;
+  if (user.acuaticapp_id) return false;
+
   const uid = String(user.user_id || '').trim();
   const url = String(user.api_url || '').toLowerCase();
   const name = String(user.name || '').toLowerCase();
   
-  return /^100\d*$/.test(uid) || 
+  return uid === '1001' || 
          url.includes('mock-external-api/deny') || 
          url.includes('mock-external-api/error') || 
          name.includes('(permitido)') || 
          name.includes('(denegado)') || 
          name.includes('(error api)') ||
-         name.includes('demo') ||
-         name.includes('prueba');
+         name.includes('demo');
 }
 
 /**
