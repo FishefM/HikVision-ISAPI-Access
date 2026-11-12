@@ -397,21 +397,50 @@ async function updateUser(req, res) {
     return res.status(500).json({ error: `Error de base de datos al actualizar: ${dbErr.message}` });
   }
 
-  // Paso 2: Sincronizar con el hardware MinMoe de los torniquetes asignados en paralelo
-  const currentDeviceIds = targetDeviceIds !== null ? targetDeviceIds : (existing ? existing.device_ids : []);
+  // Paso 2: Sincronizar con el hardware MinMoe y purgar torniquetes restringidos
+  const previousDeviceIds = (existing && existing.device_ids) ? existing.device_ids : [];
+  const currentDeviceIds = targetDeviceIds !== null ? targetDeviceIds : previousDeviceIds;
   const targetDevices = allDevices.filter(d => currentDeviceIds.includes(d.id));
-  
+
+  const oldMinMoeId = (existing && existing.attendance_token && String(existing.attendance_token).trim().length >= 8)
+    ? String(existing.attendance_token).trim().substring(0, 8)
+    : (existing && existing.user_id ? String(existing.user_id).trim() : null);
+
+  const newMinMoeId = (attendance_token && String(attendance_token).trim().length >= 8)
+    ? String(attendance_token).trim().substring(0, 8)
+    : String(user_id).trim();
+
+  // 2.1. Purgar al alumno de cualquier torniquete cuyo acceso haya sido revocado / restringido
+  const restrictedDevices = allDevices.filter(d => previousDeviceIds.includes(d.id) && !currentDeviceIds.includes(d.id));
+  if (restrictedDevices.length > 0) {
+    const idsToPurge = new Set();
+    if (oldMinMoeId) idsToPurge.add(oldMinMoeId);
+    if (newMinMoeId) idsToPurge.add(newMinMoeId);
+    if (user_id) idsToPurge.add(String(user_id).trim());
+    if (existing && existing.user_id) idsToPurge.add(String(existing.user_id).trim());
+    if (matricula) idsToPurge.add(String(matricula).trim());
+    if (existing && existing.matricula) idsToPurge.add(String(existing.matricula).trim());
+
+    for (const dev of restrictedDevices) {
+      if (dev.ip && dev.username && dev.password) {
+        logEvent('info', `[MinMoe - ${dev.name}] Acceso restringido para "${name}". Purgando usuario y tarjeta del torniquete...`);
+        for (const cleanId of idsToPurge) {
+          await deviceHelper.deleteUserFromDevice(
+            dev.ip,
+            dev.port || 80,
+            dev.username,
+            dev.password,
+            cleanId
+          ).catch(() => {});
+        }
+        logEvent('success', `[MinMoe - ${dev.name}] Registro de "${name}" eliminado exitosamente del torniquete restringido.`);
+      }
+    }
+  }
+
   let deviceSyncResult = { synced: false, userSuccess: false, cardSuccess: false, diagnostics: [], summary: '' };
   if (targetDevices.length > 0) {
-    // Si la matrícula, user_id o token cambió, remover el ID anterior del hardware MinMoe para no dejar huérfanos
-    const oldMinMoeId = (existing && existing.attendance_token && String(existing.attendance_token).trim().length >= 8)
-      ? String(existing.attendance_token).trim().substring(0, 8)
-      : (existing && existing.user_id ? String(existing.user_id).trim() : null);
-
-    const newMinMoeId = (attendance_token && String(attendance_token).trim().length >= 8)
-      ? String(attendance_token).trim().substring(0, 8)
-      : String(user_id).trim();
-
+    // Si el identificador cambió, remover el ID anterior del hardware MinMoe para no dejar huérfanos
     if (oldMinMoeId && oldMinMoeId !== newMinMoeId) {
       logEvent('info', `[MinMoe] Identificador en MinMoe modificado de "${oldMinMoeId}" a "${newMinMoeId}". Removiendo registro antiguo en torniquetes...`);
       allDevices.forEach(dev => {
@@ -1088,6 +1117,32 @@ async function syncSingleUser(req, res) {
 
     if (targetDevices.length === 0) {
       return res.status(400).json({ error: 'El alumno no tiene ningún torniquete permitido seleccionado.' });
+    }
+
+    // Purgar al alumno de torniquetes que ya no tenga permitidos
+    if (userDeviceIds.length > 0) {
+      const restrictedDevices = allDevices.filter(d => !userDeviceIds.includes(d.id) && d.ip && d.username && d.password);
+      if (restrictedDevices.length > 0) {
+        const idsToPurge = new Set();
+        if (user.attendance_token && String(user.attendance_token).trim().length >= 8) {
+          idsToPurge.add(String(user.attendance_token).trim().substring(0, 8));
+        }
+        if (user.user_id) idsToPurge.add(String(user.user_id).trim());
+        if (user.matricula) idsToPurge.add(String(user.matricula).trim());
+
+        for (const dev of restrictedDevices) {
+          logEvent('info', `[MinMoe - ${dev.name}] Torniquete no permitido para "${user.name}". Purgando del biométrico...`);
+          for (const cleanId of idsToPurge) {
+            await deviceHelper.deleteUserFromDevice(
+              dev.ip,
+              dev.port || 80,
+              dev.username,
+              dev.password,
+              cleanId
+            ).catch(() => {});
+          }
+        }
+      }
     }
 
     logEvent('info', `[MinMoe] Sincronizando alumno individual: ${user.name} (ID: ${user.user_id}) en ${targetDevices.length} torniquete(s)...`);

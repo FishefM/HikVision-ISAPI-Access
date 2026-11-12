@@ -217,6 +217,25 @@ async function run() {
     const devUsers = users.filter(u => !u.device_ids || u.device_ids.length === 0 || u.device_ids.includes(dev.id));
     console.log(`   Alumnos asignados a este dispositivo: ${devUsers.length}`);
 
+    // Purgar alumnos explícitamente restringidos de este torniquete si los hay
+    const restrictedUsers = users.filter(u => u.device_ids && u.device_ids.length > 0 && !u.device_ids.includes(dev.id));
+    if (restrictedUsers.length > 0) {
+      console.log(`   🧹 Purgando ${restrictedUsers.length} alumno(s) con acceso no permitido en este torniquete...`);
+      for (const ru of restrictedUsers) {
+        if (!options.dryRun) {
+          const idsToPurge = new Set();
+          if (ru.attendance_token && String(ru.attendance_token).trim().length >= 8) {
+            idsToPurge.add(String(ru.attendance_token).trim().substring(0, 8));
+          }
+          if (ru.user_id) idsToPurge.add(String(ru.user_id).trim());
+          if (ru.matricula) idsToPurge.add(String(ru.matricula).trim());
+          for (const cid of idsToPurge) {
+            await deviceHelper.deleteUserFromDevice(dev.ip, dev.port || 80, dev.username, dev.password, cid).catch(() => {});
+          }
+        }
+      }
+    }
+
     let okCount = 0;
     let warnCount = 0;
     let failCount = 0;
