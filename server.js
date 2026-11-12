@@ -71,6 +71,6 @@ app.listen(PORT, () => {
   console.log(`======================================================\n`);
   logEvent('info', `Servidor iniciado en puerto ${PORT}`);
 
-  // Iniciar sincronización automática recurrente cada 24 horas con AcuaticApp
+  // Iniciar sincronización automática recurrente con AcuaticApp (a las 15:00 hrs y 23:00 hrs todos los días)
   initAcuaticAppAutoSync();
 });

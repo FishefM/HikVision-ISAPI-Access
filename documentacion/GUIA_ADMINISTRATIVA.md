@@ -150,8 +150,8 @@ Para mantener la integridad de los registros de asistencia sin borrar historiale
 
 El sistema cuenta con un motor de integración bidireccional diseñado para mantener sincronizados los registros del torniquete con la plataforma institucional escolar:
 
-#### 1. Sincronización Automática en Segundo Plano (Cada 24 Horas):
-* **Completamente Autónoma:** El servidor ejecuta una tarea interna programada que se dispara **cada 24 horas**.
+#### 1. Sincronización Automática en Segundo Plano (Periódica a las 15:00 hrs y 23:00 hrs):
+* **Completamente Autónoma:** El servidor ejecuta una tarea interna programada que se dispara automáticamente **a las 15:00 hrs y a las 23:00 hrs todos los días** (configurable mediante la variable `ACUATICAPP_SYNC_HOURS`).
 * **Detección Continua de Alumnos Nuevos:** Consulta la API de producción (`https://multihivesoft.com`), detecta alumnos recién inscritos y los da de alta automáticamente en la base de datos local SQLite y en los torniquetes.
 * **Actualización No Destructiva:** No borra ni altera el historial de los alumnos existentes; únicamente actualiza tokens de asistencia o cambios de nombre.
 * **Mecanismo de Resiliencia (Reintentos y Fallback de Red):**

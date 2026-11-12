@@ -534,14 +534,14 @@ async function fetchWithRetry(url, options = {}, { maxRetries = 3, timeoutMs = 2
 
 /**
  * Lógica central para importar y sincronizar alumnos desde la API v2 de AcuaticApp
- * Reutilizable tanto por la ruta HTTP como por la sincronización automática cada 24 horas.
+ * Reutilizable tanto por la ruta HTTP como por la sincronización automática programada (15:00 y 23:00 hrs).
  */
 async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = false, trigger = 'manual' } = {}) {
   const schoolUser = user || process.env.ACUATICAPP_USER || '';
   const schoolPass = password || process.env.ACUATICAPP_PASSWORD || '';
   const apiBaseUrl = baseUrl || process.env.ACUATICAPP_BASE_URL || 'https://multihivesoft.com';
 
-  logEvent('info', `=== INICIANDO SINCRONIZACIÓN ${trigger === 'auto' ? 'AUTOMÁTICA (24h)' : 'DESDE ACUATICAPP'} (${apiBaseUrl}) ===`);
+  logEvent('info', `=== INICIANDO SINCRONIZACIÓN ${trigger === 'auto' ? 'AUTOMÁTICA PROGRAMADA' : 'DESDE ACUATICAPP'} (${apiBaseUrl}) ===`);
   logEvent('info', `Autenticando escuela "${schoolUser}"...`);
 
   // 1. Login en AcuaticApp (con reintento automático)
@@ -685,27 +685,92 @@ async function syncAcuaticAppUsers(req, res) {
 }
 
 /**
- * Inicia el cron / intervalo de sincronización automática recurrente cada 24 horas
+ * Obtiene las horas configuradas para la sincronización automática diaria.
+ * Por defecto se ejecuta a las 15:00 hrs y a las 23:00 hrs todos los días.
  */
-function initAcuaticAppAutoSync() {
-  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+function getScheduledSyncHours() {
+  if (process.env.ACUATICAPP_SYNC_HOURS) {
+    const parsed = process.env.ACUATICAPP_SYNC_HOURS.split(',')
+      .map(h => parseInt(h.trim(), 10))
+      .filter(h => !isNaN(h) && h >= 0 && h <= 23);
+    if (parsed.length > 0) {
+      return [...new Set(parsed)].sort((a, b) => a - b);
+    }
+  }
+  return [15, 23];
+}
 
-  // Programar tarea recurrente cada 24 horas
-  const timer = setInterval(async () => {
-    logEvent('info', '[Auto-Sync] Iniciando ciclo diario de sincronización automática de alumnos...');
+/**
+ * Calcula la fecha y hora de la próxima sincronización programada.
+ */
+function getNextSyncDate(targetHours = [15, 23], fromDate = new Date()) {
+  const now = fromDate;
+  const candidates = targetHours.map(hour => {
+    const candidate = new Date(now);
+    candidate.setHours(hour, 0, 0, 0);
+    // Si la hora ya pasó hoy (es menor o igual al momento actual), programar para el día siguiente
+    if (candidate.getTime() <= now.getTime()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+    return candidate;
+  });
+
+  candidates.sort((a, b) => a.getTime() - b.getTime());
+  return candidates[0];
+}
+
+let autoSyncTimeout = null;
+
+/**
+ * Programa la siguiente ejecución de sincronización automática según los horarios fijados (15:00 y 23:00 hrs).
+ */
+function scheduleNextAcuaticAppSync() {
+  if (autoSyncTimeout) {
+    clearTimeout(autoSyncTimeout);
+    autoSyncTimeout = null;
+  }
+
+  const hours = getScheduledSyncHours();
+  const nextRun = getNextSyncDate(hours);
+  const now = new Date();
+  const delayMs = Math.max(1000, nextRun.getTime() - now.getTime());
+
+  const formattedHours = hours.map(h => `${String(h).padStart(2, '0')}:00`).join(' y ');
+  const nextTimeStr = nextRun.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const nextDateStr = nextRun.toLocaleDateString('es-MX');
+  const diffHours = (delayMs / (1000 * 60 * 60)).toFixed(2);
+
+  logEvent('info', `[Auto-Sync] Sincronización automática de AcuaticApp configurada a las ${formattedHours} hrs diarias. Próxima ejecución: ${nextDateStr} a las ${nextTimeStr} hrs (en ~${diffHours}h).`);
+
+  autoSyncTimeout = setTimeout(async () => {
+    // Si el temporizador despertó unos milisegundos antes del horario exacto, esperar el remanente
+    const remaining = nextRun.getTime() - Date.now();
+    if (remaining > 0) {
+      await new Promise(resolve => setTimeout(resolve, remaining));
+    }
+
+    logEvent('info', `[Auto-Sync] Iniciando ciclo programado de sincronización automática de alumnos (${nextTimeStr} hrs)...`);
     try {
       const res = await performAcuaticAppSync({ clearFirst: false, trigger: 'auto' });
       logEvent('success', `[Auto-Sync OK] ${res.message}`);
     } catch (err) {
       logEvent('warning', `[Auto-Sync AVISO] No se pudo completar la sincronización automática: ${err.message}`);
+    } finally {
+      // Reprogramar recursivamente para el siguiente horario fijado
+      scheduleNextAcuaticAppSync();
     }
-  }, TWENTY_FOUR_HOURS_MS);
+  }, delayMs);
 
-  if (typeof timer.unref === 'function') {
-    timer.unref();
+  if (typeof autoSyncTimeout.unref === 'function') {
+    autoSyncTimeout.unref();
   }
+}
 
-  logEvent('info', '[Auto-Sync] Sincronización automática de alumnos configurada cada 24 horas.');
+/**
+ * Inicia la sincronización automática recurrente de AcuaticApp (a las 15:00 hrs y 23:00 hrs periódicamente todos los días)
+ */
+function initAcuaticAppAutoSync() {
+  scheduleNextAcuaticAppSync();
 }
 
 /**

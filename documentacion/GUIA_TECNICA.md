@@ -210,7 +210,7 @@ La sincronización interactúa con la API REST institucional:
 1. **Autenticación:** `POST https://multihivesoft.com/api/school/login` con credenciales escolares (`ACUATICAPP_USER` y `ACUATICAPP_PASSWORD`) para obtener el Bearer Token de sesión.
 2. **Paginación:** `GET https://multihivesoft.com/api/v2/administration/student/getStudents?page=X&per_page=50`.
 3. **Mapeo de Campos y Attendance Token:** Extrae `id`, `name`, `second_name`, `last_name`, `matricula`, `phone`, `image_file` y `attendance_token`. Si el alumno posee token, se asigna su URL de verificación directa (`/api/attendance/scan/:token`).
-4. **Ciclo Automático cada 24 Horas:** Función `initAcuaticAppAutoSync()` iniciada en el arranque de `server.js` que ejecuta periódicamente la importación de alumnos nuevos y actualización de tokens en segundo plano.
+4. **Ciclo Automático Programado (15:00 y 23:00 hrs):** Función `initAcuaticAppAutoSync()` iniciada en el arranque de `server.js` que ejecuta periódicamente la importación de alumnos nuevos y actualización de tokens en segundo plano todos los días a las 15:00 hrs y a las 23:00 hrs (configurable mediante la variable `ACUATICAPP_SYNC_HOURS`).
 5. **Resiliencia de Red y Reintentos:** Módulo `fetchWithRetry` implementado con `axios`, forzado de IPv4 (`family: 4`), resolución DNS rápida en memoria con servidores públicos (1.1.1.1, 8.8.8.8) y hasta 3 reintentos automáticos ante timeouts o errores transitorios.
 6. **Reactivación Automática:** Si un alumno estaba marcado con `is_deleted = 1` o `is_archived = 1` pero viene activo en la respuesta de la escuela, el método `addUser` en [`config/database.js`](file:///home/yucef_U/Chamba/Torniquete/config/database.js) restablece automáticamente `is_deleted = 0` e `is_archived = 0`.
 
