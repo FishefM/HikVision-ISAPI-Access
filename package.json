@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "sync:torniquetes": "node scripts/sync-controlled.js",
+    "sync:dry": "node scripts/sync-controlled.js --dry-run",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

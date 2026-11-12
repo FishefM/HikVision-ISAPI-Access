@@ -925,7 +925,13 @@ async function syncAllUsers(req, res) {
         });
 
         if (i < devUsers.length - 1) {
-          await new Promise(r => setTimeout(r, 20));
+          // Pausa controlada configurable (por defecto 250ms) para no saturar el CPU del Hikvision MinMoe
+          const syncDelay = parseInt(process.env.HIKVISION_SYNC_DELAY_MS, 10) || 250;
+          await new Promise(r => setTimeout(r, syncDelay));
+          // Cada 25 alumnos, respiro de 1.5s al procesador embebido del lector
+          if ((i + 1) % 25 === 0) {
+            await new Promise(r => setTimeout(r, 1500));
+          }
         }
       }
 

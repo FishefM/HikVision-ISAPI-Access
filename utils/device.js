@@ -611,6 +611,7 @@ async function syncFullUserToDevice(settings, user) {
   if (user.user_id && minMoeId !== String(user.user_id).trim()) {
     try {
       await deleteUserFromDevice(ip, port, userAuth, pass, user.user_id);
+      await new Promise(r => setTimeout(r, 60));
     } catch (_) {}
   }
 
@@ -630,6 +631,9 @@ async function syncFullUserToDevice(settings, user) {
       summary: `Fallo al registrar usuario en MinMoe: ${userRes.diagnostic}`
     };
   }
+
+  // Pausa breve para permitir commit en memoria flash antes de asociar tarjeta
+  await new Promise(r => setTimeout(r, 60));
 
   // 2. Sincronizar tarjeta (asociada al token minimizado)
   const cardRes = await syncCardInfo(ip, port, userAuth, pass, minMoeId, minMoeId);
