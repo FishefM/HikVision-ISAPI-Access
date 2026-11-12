@@ -28,6 +28,7 @@ function parseArgs() {
     batchSize: 25,     // cantidad de alumnos por lote
     cooldownMs: 1500,  // ms de enfriamiento tras cada lote
     deviceId: null,    // ID específico de torniquete
+    startFrom: 1,      // alumno inicial (1-indexed) para reanudar
     onlyToken: false,  // solo alumnos con attendance_token
     includeTests: false, // incluir usuarios de prueba
     limit: null,       // límite de alumnos a sincronizar
@@ -44,6 +45,8 @@ function parseArgs() {
     else if (arg.startsWith('--batch=')) options.batchSize = parseInt(arg.split('=')[1], 10) || options.batchSize;
     else if (arg.startsWith('--cooldown=')) options.cooldownMs = parseInt(arg.split('=')[1], 10) || options.cooldownMs;
     else if (arg.startsWith('--device=')) options.deviceId = arg.split('=')[1].trim();
+    else if (arg.startsWith('--start-from=')) options.startFrom = parseInt(arg.split('=')[1], 10) || 1;
+    else if (arg.startsWith('--from=')) options.startFrom = parseInt(arg.split('=')[1], 10) || 1;
     else if (arg.startsWith('--limit=')) options.limit = parseInt(arg.split('=')[1], 10);
   }
   return options;
@@ -57,7 +60,8 @@ Opciones disponibles:
   --delay=<ms>       Pausa en milisegundos entre cada alumno (por defecto: 300 ms).
   --batch=<n>        Número de alumnos por lote antes de una pausa de enfriamiento (por defecto: 25).
   --cooldown=<ms>    Pausa de enfriamiento entre lotes (por defecto: 1500 ms).
-  --device=<id>      Sincronizar únicamente el torniquete con el ID especificado.
+  --device=<id>      Sincronizar únicamente el torniquete especificado (por ID o nombre, ej: --device=2 o --device="Bebés").
+  --start-from=<n>   Reanudar la sincronización a partir del alumno número <n> (ej: --start-from=241).
   --only-token       Sincronizar únicamente alumnos que cuenten con attendance_token de AcuaticApp.
   --include-tests    Incluir usuarios demo/pruebas (por defecto se excluyen).
   --limit=<n>        Sincronizar únicamente los primeros <n> alumnos (útil para pruebas).
@@ -119,7 +123,12 @@ async function run() {
   let devicesToSync = allDevices.filter(d => d.is_active !== 0 && d.ip && d.username && d.password);
 
   if (options.deviceId) {
-    devicesToSync = devicesToSync.filter(d => String(d.id) === String(options.deviceId) || d.name.toLowerCase() === options.deviceId.toLowerCase());
+    const term = options.deviceId.toLowerCase();
+    devicesToSync = devicesToSync.filter(d => 
+      String(d.id) === String(options.deviceId) || 
+      d.name.toLowerCase() === term ||
+      d.name.toLowerCase().includes(term)
+    );
   }
 
   if (devicesToSync.length === 0) {
@@ -212,7 +221,12 @@ async function run() {
     let warnCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < devUsers.length; i++) {
+    const startIndex = Math.max(0, (options.startFrom || 1) - 1);
+    if (startIndex > 0) {
+      console.log(`   ⏭ Reanudando desde el alumno #${options.startFrom} (omitiendo primeros ${startIndex} alumnos)...`);
+    }
+
+    for (let i = startIndex; i < devUsers.length; i++) {
       const u = devUsers[i];
       const percent = (((i + 1) / devUsers.length) * 100).toFixed(1).padStart(5, ' ');
       const idxStr = `[${String(i + 1).padStart(String(devUsers.length).length, ' ')}/${devUsers.length}]`;
