@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "sync:torniquetes": "node scripts/sync-controlled.js",
     "sync:dry": "node scripts/sync-controlled.js --dry-run",
+    "check:torniquetes": "node scripts/check-device-users.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
