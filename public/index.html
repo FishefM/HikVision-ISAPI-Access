@@ -619,6 +619,69 @@
     </div>
   </div>
 
+  <!-- Modal Resumen Sincronización AcuaticApp -->
+  <div id="sync-summary-modal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 620px; width: 95%; max-height: 88vh; padding: 1.5rem; display: flex; flex-direction: column;">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <div style="width: 34px; height: 34px; border-radius: 8px; background: rgba(59, 130, 246, 0.15); display: flex; align-items: center; justify-content: center; color: var(--primary);">
+            <i data-lucide="refresh-cw" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700;">Resumen de Sincronización</h3>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">AcuaticApp (Multihivesoft v2)</span>
+          </div>
+        </div>
+        <button id="btn-close-sync-modal-x" type="button" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; padding: 4px;" title="Cerrar">
+          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+        </button>
+      </div>
+
+      <!-- Tarjetas KPI -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1.25rem;">
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.75rem; text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Total Alumnos</div>
+          <div id="sync-modal-total" style="font-size: 1.4rem; font-weight: 800; color: var(--text);">0</div>
+        </div>
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 0.75rem; text-align: center;">
+          <div style="font-size: 0.75rem; color: #10b981; font-weight: 600; margin-bottom: 0.25rem;">Nuevos Registros</div>
+          <div id="sync-modal-new" style="font-size: 1.4rem; font-weight: 800; color: #10b981;">0</div>
+        </div>
+        <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 10px; padding: 0.75rem; text-align: center;">
+          <div style="font-size: 0.75rem; color: #3b82f6; font-weight: 600; margin-bottom: 0.25rem;">Tokens Actualizados</div>
+          <div id="sync-modal-updated" style="font-size: 1.4rem; font-weight: 800; color: #3b82f6;">0</div>
+        </div>
+      </div>
+
+      <!-- Contenedor con Scroll para detalles de alumnos -->
+      <div style="flex: 1; overflow-y: auto; margin-bottom: 1.25rem; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(0,0,0,0.2); min-height: 140px; max-height: 260px;">
+        <div id="sync-modal-empty" class="hidden" style="padding: 2rem 1rem; text-align: center; color: var(--text-muted);">
+          <i data-lucide="check-circle-2" style="width: 36px; height: 36px; color: #10b981; margin: 0 auto 0.75rem; display: block;"></i>
+          <p style="margin: 0; font-weight: 600; color: var(--text);">¡Todos los alumnos están al día!</p>
+          <span style="font-size: 0.8rem;">No se detectaron alumnos nuevos ni cambios en tokens en esta sincronización.</span>
+        </div>
+
+        <div id="sync-modal-list" style="padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem;">
+          <!-- Items inyectados dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Banner de estado del Hardware -->
+      <div id="sync-modal-hardware-status" style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 0.6rem 0.85rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; font-size: 0.8rem; color: var(--text);">
+        <i data-lucide="zap" style="width: 16px; height: 16px; color: var(--primary); flex-shrink: 0;"></i>
+        <span id="sync-modal-hardware-text">Los alumnos modificados se registran de forma automática en segundo plano en los torniquetes.</span>
+      </div>
+
+      <!-- Botón de acción -->
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="button" id="btn-close-sync-modal" class="btn btn-primary" style="padding: 0.5rem 1.5rem; font-weight: 600;">
+          Aceptar
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

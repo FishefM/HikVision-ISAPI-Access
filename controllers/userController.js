@@ -615,6 +615,8 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
   const allDevices = await dbHelper.getDevices();
   const availableDeviceIds = allDevices.filter(d => d.is_active !== 0).map(d => d.id);
   const usersToSyncToHardware = [];
+  const newStudentsList = [];
+  const updatedTokensList = [];
 
   for (const st of extractedStudents) {
     const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
@@ -646,9 +648,22 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
       if (userResult.is_created) {
         createdCount++;
         usersToSyncToHardware.push(userResult);
+        newStudentsList.push({
+          id: userResult.id,
+          user_id: userResult.user_id,
+          name: userResult.name,
+          attendance_token: userResult.attendance_token
+        });
       } else if (userResult.token_changed) {
         updatedCount++;
         usersToSyncToHardware.push(userResult);
+        updatedTokensList.push({
+          id: userResult.id,
+          user_id: userResult.user_id,
+          name: userResult.name,
+          old_token: userResult.old_token || null,
+          new_token: userResult.attendance_token
+        });
       } else {
         updatedCount++;
       }
@@ -677,6 +692,8 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
     created: createdCount,
     updated: updatedCount,
     syncedToHardware: usersToSyncToHardware.length,
+    newStudents: newStudentsList,
+    updatedTokens: updatedTokensList,
     school: schoolInfo,
     message: summary
   };

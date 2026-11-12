@@ -885,9 +885,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         appendConsoleLog('success', `[AcuaticApp OK] ${data.message}`);
-        alert(`[Sincronización Exitosa]\n${data.message}`);
         closeSyncMenu();
         refreshUsers();
+        showSyncSummaryModal(data);
       } else {
         throw new Error(data.error || 'Fallo en la sincronización');
       }
@@ -909,6 +909,107 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (window.lucide) window.lucide.createIcons();
     }
+  }
+
+  // Cuadro de diálogo modal para mostrar el resumen detallado de sincronización
+  function showSyncSummaryModal(data) {
+    const modal = document.getElementById('sync-summary-modal');
+    if (!modal) {
+      alert(`[Sincronización Exitosa]\n${data.message}`);
+      return;
+    }
+
+    const elTotal = document.getElementById('sync-modal-total');
+    const elNew = document.getElementById('sync-modal-new');
+    const elUpdated = document.getElementById('sync-modal-updated');
+    const elList = document.getElementById('sync-modal-list');
+    const elEmpty = document.getElementById('sync-modal-empty');
+    const elHwText = document.getElementById('sync-modal-hardware-text');
+
+    if (elTotal) elTotal.textContent = data.total || 0;
+    if (elNew) elNew.textContent = data.created || 0;
+    if (elUpdated) elUpdated.textContent = (data.updatedTokens && data.updatedTokens.length) || 0;
+
+    const newStudents = data.newStudents || [];
+    const updatedTokens = data.updatedTokens || [];
+    const totalChanges = newStudents.length + updatedTokens.length;
+
+    if (elList) elList.innerHTML = '';
+
+    if (totalChanges === 0) {
+      if (elEmpty) elEmpty.classList.remove('hidden');
+      if (elHwText) elHwText.textContent = '✓ Todos los alumnos y torniquetes se encuentran al día con sus accesos.';
+    } else {
+      if (elEmpty) elEmpty.classList.add('hidden');
+      if (elHwText) {
+        elHwText.textContent = `⚡ ${totalChanges} alumno(s) detectado(s). Se registraron automáticamente en segundo plano en los torniquetes asignados.`;
+      }
+
+      // Renderizar alumnos nuevos
+      newStudents.forEach(st => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.85rem; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; font-size: 0.85rem; gap: 0.5rem;';
+        
+        const tokenBadge = st.attendance_token 
+          ? `<span style="font-family: monospace; background: rgba(16, 185, 129, 0.15); color: #10b981; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">Token: ${escapeHTML(st.attendance_token.substring(0, 8))}</span>`
+          : '<span style="color: var(--text-muted); font-size: 0.75rem;">Sin token</span>';
+
+        item.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 0.6rem; min-width: 0;">
+            <span style="background: #10b981; color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; flex-shrink: 0;">NUEVO</span>
+            <div style="min-width: 0;">
+              <div style="font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(st.name || 'Alumno')}</div>
+              <div style="font-size: 0.73rem; color: var(--text-muted);">ID / Matrícula: ${escapeHTML(String(st.user_id || ''))}</div>
+            </div>
+          </div>
+          <div style="flex-shrink: 0;">${tokenBadge}</div>
+        `;
+        elList.appendChild(item);
+      });
+
+      // Renderizar alumnos con token actualizado
+      updatedTokens.forEach(st => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.6rem 0.85rem; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; font-size: 0.85rem; gap: 0.5rem;';
+        
+        const oldTokStr = st.old_token ? escapeHTML(st.old_token.substring(0, 8)) : 'ninguno';
+        const newTokStr = st.new_token ? escapeHTML(st.new_token.substring(0, 8)) : 'ninguno';
+
+        item.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 0.6rem; min-width: 0;">
+            <span style="background: #3b82f6; color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; flex-shrink: 0;">TOKEN MODIFICADO</span>
+            <div style="min-width: 0;">
+              <div style="font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(st.name || 'Alumno')}</div>
+              <div style="font-size: 0.73rem; color: var(--text-muted);">ID / Matrícula: ${escapeHTML(String(st.user_id || ''))}</div>
+            </div>
+          </div>
+          <div style="flex-shrink: 0; text-align: right;">
+            <span style="font-family: monospace; background: rgba(59, 130, 246, 0.15); color: #3b82f6; padding: 2px 6px; border-radius: 4px; font-size: 0.73rem;">${oldTokStr} → ${newTokStr}</span>
+          </div>
+        `;
+        elList.appendChild(item);
+      });
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  // Cerrar el modal de resumen de sincronización
+  const btnCloseSyncModal = document.getElementById('btn-close-sync-modal');
+  const btnCloseSyncModalX = document.getElementById('btn-close-sync-modal-x');
+  const syncSummaryModal = document.getElementById('sync-summary-modal');
+
+  function closeSyncSummaryModal() {
+    if (syncSummaryModal) syncSummaryModal.classList.add('hidden');
+  }
+
+  if (btnCloseSyncModal) btnCloseSyncModal.addEventListener('click', closeSyncSummaryModal);
+  if (btnCloseSyncModalX) btnCloseSyncModalX.addEventListener('click', closeSyncSummaryModal);
+  if (syncSummaryModal) {
+    syncSummaryModal.addEventListener('click', (e) => {
+      if (e.target === syncSummaryModal) closeSyncSummaryModal();
+    });
   }
 
   // Clic en el botón directo de sincronización manual

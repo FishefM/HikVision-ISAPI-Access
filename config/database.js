@@ -611,6 +611,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             acuaticapp_id: acuaticappId,
             attendance_token: attendanceToken,
             token_changed: tokenChanged,
+            old_token: oldToken,
             is_updated: true
           });
         } catch (updErr) {
