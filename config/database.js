@@ -566,8 +566,17 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
       if (err) return rej(err);
 
       if (existing) {
-        // Actualizar usuario existente sin duplicar y reactivar si estaba eliminado o archivado
+        // Actualizar usuario existente sin duplicar
         try {
+          // Preservar la asignación de torniquetes existente si ya está configurada
+          let targetDevicesToUpdate = targetDeviceIds;
+          if (userData.preserve_devices !== false) {
+            const currentDevIds = await getUserDeviceIds(existing.user_id);
+            if (currentDevIds && currentDevIds.length > 0) {
+              targetDevicesToUpdate = undefined; // No sobrescribir torniquetes ya asignados
+            }
+          }
+
           await updateUser(existing.id, {
             user_id: userId || existing.user_id,
             name: name || undefined,
@@ -580,9 +589,9 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
             image_file: imageFile || undefined,
             acuaticapp_id: acuaticappId || undefined,
             attendance_token: attendanceToken || undefined,
-            is_deleted: userData.is_deleted !== undefined ? (userData.is_deleted ? 1 : 0) : 0,
-            is_archived: userData.is_archived !== undefined ? (userData.is_archived ? 1 : 0) : 0,
-            device_ids: targetDeviceIds
+            is_deleted: userData.is_deleted !== undefined ? (userData.is_deleted ? 1 : 0) : undefined,
+            is_archived: userData.is_archived !== undefined ? (userData.is_archived ? 1 : 0) : undefined,
+            device_ids: targetDevicesToUpdate
           });
           return res({
             id: existing.id,
@@ -616,7 +625,7 @@ const addUser = (userData, legacyName, legacyApiUrl, legacyDeviceIds = null) => 
           let devicesToAssign = targetDeviceIds;
           if (!devicesToAssign || (Array.isArray(devicesToAssign) && devicesToAssign.length === 0)) {
             const allDevs = await getDevices().catch(() => []);
-            devicesToAssign = allDevs.map(d => d.id);
+            devicesToAssign = allDevs.filter(d => d.is_active !== 0).map(d => d.id);
           }
 
           await setUserDevices(userId, devicesToAssign).catch(() => {});

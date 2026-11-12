@@ -608,12 +608,12 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
     }
   }
 
-  // 4. Guardar los alumnos extraídos en SQLite
+  // 4. Guardar los alumnos extraídos en SQLite sin sobrescribir torniquetes existentes
   let totalProcessed = 0;
   let createdCount = 0;
   let updatedCount = 0;
   const allDevices = await dbHelper.getDevices();
-  const allDeviceIds = allDevices.map(d => d.id);
+  const availableDeviceIds = allDevices.filter(d => d.is_active !== 0).map(d => d.id);
 
   for (const st of extractedStudents) {
     const fullName = [st.name, st.second_name, st.last_name].filter(Boolean).join(' ').trim() || `Alumno ${st.id}`;
@@ -638,7 +638,8 @@ async function performAcuaticAppSync({ user, password, baseUrl, clearFirst = fal
         image_file: st.image_file || null,
         acuaticapp_id: st.id,
         attendance_token: attendanceToken,
-        device_ids: allDeviceIds
+        device_ids: availableDeviceIds,
+        preserve_devices: true // Preserva la configuración de torniquetes asignados de alumnos existentes
       });
 
       if (userResult.is_created) {
@@ -864,10 +865,10 @@ async function syncAllUsers(req, res) {
   try {
     const targetDeviceId = req.query.deviceId || req.query.device_id;
     const allDevices = await dbHelper.getDevices();
-    let devicesToSync = allDevices;
+    let devicesToSync = allDevices.filter(d => d.is_active !== 0);
 
     if (targetDeviceId) {
-      devicesToSync = allDevices.filter(d => String(d.id) === String(targetDeviceId));
+      devicesToSync = devicesToSync.filter(d => String(d.id) === String(targetDeviceId));
     }
 
     if (devicesToSync.length === 0) {
